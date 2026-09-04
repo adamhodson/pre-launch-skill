@@ -43,6 +43,7 @@ Reaching your own API from a device or emulator is the same trap as on any mobil
 ## build
 **iOS release.** Either through Xcode (Product → Archive on the `Release` scheme, then Distribute App) or from the CLI:
 ```bash
+# do not run during an audit — invokes release signing / writes ios/build; see MOB-011 for the profile build
 cd ios && xcodebuild -workspace <App>.xcworkspace -scheme <App> -configuration Release \
   -archivePath build/<App>.xcarchive archive
 xcodebuild -exportArchive -archivePath build/<App>.xcarchive -exportOptionsPlist ExportOptions.plist -exportPath build/
@@ -51,6 +52,7 @@ For MOB-010 the question is whether the artifact the user is about to submit cam
 
 **Android release.**
 ```bash
+# do not run during an audit — invokes release signing / writes android/app/build; see MOB-011 for the profile build
 cd android && ./gradlew bundleRelease      # .aab for Play — this is the submittable artifact
 cd android && ./gradlew assembleRelease    # .apk, for sideloading and for inspection
 ```

@@ -127,6 +127,10 @@ The cron guard, which is what SEC-014 is looking for on this platform:
 
 ```ts
 // app/api/cron/reconcile/route.ts — the first statements, before any work
+// Node runtime, not Edge: timingSafeEqual and Buffer are Node built-ins.
+// On the Edge runtime use WebCrypto and a hand-written constant-time compare instead.
+import crypto from 'node:crypto'
+
 export async function GET(req: Request) {
   const expected = `Bearer ${process.env.CRON_SECRET}`
   const got = req.headers.get('authorization') ?? ''

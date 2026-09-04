@@ -281,7 +281,7 @@ adb shell pm get-app-links <package>                              # verification
 **Push.** `getExpoPushTokenAsync()` needs a device and a `projectId`. Send a test with:
 ```bash
 curl -sS -X POST https://exp.host/--/api/v2/push/send -H 'content-type: application/json' \
-  -d '{"to":"ExponentPushToken[...]","title":"probe","body":"probe"}'
+  -d '{"to":"<push token>","title":"probe","body":"probe"}'
 ```
 Confirm the token is cleared on logout by logging out and re-reading the stored token.
 

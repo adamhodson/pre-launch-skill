@@ -53,6 +53,7 @@ Reaching your own API from a device is the same trap as on any mobile stack — 
 ## build
 **Android.**
 ```bash
+# do not run during an audit — invokes release signing / writes build/; see MOB-011 for the profile build
 flutter build appbundle --release      # .aab — the submittable Play artifact
 flutter build apk --release            # .apk, for sideloading and inspection
 flutter build apk --release --split-per-abi
@@ -62,6 +63,7 @@ Output lands under `build/app/outputs/bundle/release/` and `build/app/outputs/fl
 
 **iOS.**
 ```bash
+# do not run during an audit — invokes release signing / writes build/; see MOB-011 for the profile build
 flutter build ipa --release            # produces build/ios/archive/Runner.xcarchive and, with an export options plist, an .ipa
 flutter build ios --release --no-codesign
 open ios/Runner.xcworkspace            # then Product → Archive for the interactive path
@@ -80,6 +82,9 @@ That TODO is in the generated project and survives to production more often than
 **Keystore (MOB-013, SEC-001).** `android/key.properties` and any `*.jks` / `*.keystore` must be gitignored, and `git log --all --oneline -- android/key.properties 'android/**/*.jks'` should return nothing; a keystore that was ever committed is compromised and, unlike an API key, cannot simply be rotated. On the iOS side the equivalents are `*.p12`, `*.mobileprovision`, and `AuthKey_*.p8`. Then check the backup half: with Play App Signing on, Google holds the app signing key and losing the *upload* key is recoverable; without it, losing the keystore permanently ends the app's ability to ship updates. Establish which is in use and confirm the keystore lives somewhere other than one laptop.
 
 **Inspecting the artifact for MOB-011.** There is no JavaScript bundle, so the only path is a built binary — and the build mode decides whether the check works at all:
+
+<!-- keep in sync with checks/mobile.md MOB-011 -->
+
 
 ```bash
 flutter build apk --profile

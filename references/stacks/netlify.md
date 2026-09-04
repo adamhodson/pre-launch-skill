@@ -84,7 +84,9 @@ Netlify environment variables have **two independent axes**, and both matter:
 netlify env:list                                  # all contexts
 netlify env:list --context production
 netlify env:list --context deploy-preview
-netlify env:get DATABASE_URL --context deploy-preview
+# compare the two listings by NAME and scope only — never print a value into evidence.
+# Where a name exists in both, establish that the values differ by some other means
+# (the database the site is attached to, the project ref, a host in a config file).
 ```
 
 **DAT-017's whole question lives here.** The default when a variable is created without specifying a context is a single value used everywhere — so every deploy preview of every pull request holds the production `DATABASE_URL`, a migration on a feature branch runs against production, and the preview app writes live customer rows. What to compare between the production and deploy-preview contexts:
