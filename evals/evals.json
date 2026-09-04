@@ -63,7 +63,7 @@
         "SEO and accessibility checks are marked skipped/not applicable/error with a reason, not reported as failures of the API \u2014 except that a `fail` backed by static, code-cited behavioral evidence (e.g. a missing-resource route returning 200 instead of 404) is acceptable",
         "Runtime flow checks that could not be exercised are recorded with verified_by static or static-fallback (or status error), and none claims a runtime pass",
         "The run completes and writes findings.json and report.md (no crash)",
-        "git status is clean outside .pre-launch/",
+        "git status is clean outside .pre-launch/ (an untracked root .gitignore containing the `.pre-launch/` line is the one sanctioned exception)",
         "At least 150 distinct check IDs are recorded in findings.json with a verified_by tier each",
         "Page-rendering checks (SEO-004 and similar) are recorded as error or skipped with a reason, never as a `pass` claimed from a live page, since no server ran; a static `fail` with code-cited evidence is acceptable",
         "Measurement checks (PERF-001/011/015/018) are status error, not pass; PERF-016 may pass only via its documented not-applicable branch (no serverless deployment), never from a claimed measurement"
@@ -83,7 +83,7 @@
         "The delta line reports 2 resolved",
         "SEC-051, DAT-001, SEC-035 and COMP-001 remain fail",
         "findings.json runs array has two entries (the previous audit plus this run)",
-        "git status is clean outside .pre-launch/",
+        "git status is clean outside .pre-launch/ (an untracked root .gitignore containing the `.pre-launch/` line is the one sanctioned exception)",
         "The summary notes that new findings include checks run for the first time (previous run covered fewer domains)",
         "Every finding present in the previous findings.json retains its original first_seen value"
       ]
@@ -100,7 +100,7 @@
         "The five pre-existing findings outside the compliance domain are carried forward with their status and last_checked unchanged",
         "COMP-001 (privacy policy) is still fail and new compliance findings are present (e.g. terms page missing)",
         "report.md's latest-run line shows Domains: compliance",
-        "git status is clean outside .pre-launch/",
+        "git status is clean outside .pre-launch/ (an untracked root .gitignore containing the `.pre-launch/` line is the one sanctioned exception)",
         "Compliance findings (including the pre-existing COMP-001) carry last_checked equal to the new run's timestamp, while the five prior non-compliance findings keep last_checked 2026-09-03T12:00:00Z",
         "At least 30 compliance check IDs (COMP-001..036) appear in findings.json with a status"
       ]
