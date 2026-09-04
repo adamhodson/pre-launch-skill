@@ -1,10 +1,109 @@
 {
   "skill_name": "pre-launch",
   "evals": [
-    {"id": 1, "prompt": "I'm about to launch this Next.js app. Run a pre-launch audit. There's no dev server running, just look at the code.", "expected_output": "Config detected as nextjs+supabase+stripe, web. Static-only run. .pre-launch/findings.json and report.md exist. SEC-001, SEC-051, DAT-001, SEC-035, SEO-009, COMP-001, PAY-018, DAT-004, HYG-003 are fail. No project files modified.", "files": ["evals/fixtures/broken-next"]},
-    {"id": 2, "prompt": "/pre-launch fix security seo — do the easy ones first and pause before the guided ones", "expected_output": "SEC-035 and SEO-009 fixed and committed as separate commits named fix(SEC-035)... and fix(SEO-009)...; SEC-001 handled as easy (moved to env) with a rotation warning; pause before SEC-051; nothing outside security and seo touched.", "files": ["evals/fixtures/broken-next-with-findings"]},
-    {"id": 3, "prompt": "pre-launch check on this API service please. it's express + prisma, no frontend, and I can't run it locally right now", "expected_output": "Stacks express+prisma. Static only. SEC-011 fail (orders/:id unscoped), SEC-038 fail ($queryRawUnsafe), SEC-035 fail (cors()), PAY-005 not applicable (payments false) or fail if payments detected via amount column, SEO and A11Y skipped or error with reasons, FLOW checks error: local tier unavailable. No crash.", "files": ["evals/fixtures/api-only"]},
-    {"id": 4, "prompt": "I added a not-found page and moved the Stripe key to an env var since last time. Re-run the pre-launch audit and show me what changed.", "expected_output": "SEO-009 and SEC-001 flip to pass with resolved set and first_seen preserved from 2026-09-03T12:00:00Z; delta line reports 2 resolved; other four still fail.", "files": ["evals/fixtures/broken-next-fixed-two"]},
-    {"id": 5, "prompt": "/pre-launch compliance", "expected_output": "Only compliance findings are updated; the six existing findings in other domains are carried forward unchanged; report shows domains: compliance for the latest run.", "files": ["evals/fixtures/broken-next-with-findings"]}
+    {
+      "id": 1,
+      "prompt": "I'm about to launch this Next.js app. Run a pre-launch audit. There's no dev server running, just look at the code.",
+      "expected_output": "Config detected as nextjs+supabase+stripe, web. Static-only run. .pre-launch/findings.json and report.md exist. SEC-001, SEC-051, DAT-001, SEC-035, SEO-009, COMP-001, PAY-018, DAT-004, HYG-003 are fail. No project files modified.",
+      "files": [
+        "evals/fixtures/broken-next"
+      ],
+      "assertions": [
+        "A structured findings file (findings.json) and a human-readable report (report.md) exist in outputs",
+        "Detected stack is recorded as Next.js plus Supabase plus Stripe (config.yml or report)",
+        "Report flags the hardcoded Stripe live key in app/api/webhooks/stripe/route.ts as a failing critical finding",
+        "Report flags the webhook handler parsing the body before signature verification as a failing finding",
+        "Report flags RLS disabled on the documents table as a failing finding",
+        "Report flags Access-Control-Allow-Origin: * as a failing finding",
+        "Report flags the missing not-found page as a failing finding",
+        "Report flags the missing privacy policy as a failing finding",
+        "Report flags entitlement being granted from the ?paid=true success-URL parameter as a failing finding",
+        "Report flags the service-role key exposed via a NEXT_PUBLIC_ variable as a failing finding",
+        "Report flags placeholder content (Create Next App title, lorem ipsum) as a failing finding",
+        "No runtime-only check is reported as pass; findings that need a running server are marked error/attest/static-fallback, not pass",
+        "git status is clean: no project file outside .pre-launch/ (and a .gitignore line) was created or modified",
+        "At least 200 distinct check IDs are recorded in findings.json, each with a status from pass/fail/attest/skipped/error and a verified_by tier",
+        "Every measurement check (load test, Core Web Vitals, memory under load, cold start, 3G run) is status error with a note that the tier was unavailable \u2014 none is pass",
+        "The report lists critical-severity attest findings separately from critical fail blockers",
+        "A .gitignore entry for .pre-launch/ exists after the run"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "/pre-launch fix security seo \u2014 do the easy ones first and pause before the guided ones",
+      "expected_output": "SEC-035 and SEO-009 fixed and committed as separate commits named fix(SEC-035)... and fix(SEO-009)...; SEC-001 handled as easy (moved to env) with a rotation warning; pause before SEC-051; nothing outside security and seo touched.",
+      "files": [
+        "evals/fixtures/broken-next-with-findings"
+      ],
+      "assertions": [
+        "The CORS wildcard finding (SEC-035) is fixed in the code and committed in its own commit",
+        "A not-found page (SEO-009) is added and committed in its own commit",
+        "The hardcoded Stripe key (SEC-001) is moved to an environment variable and committed in its own commit, with a warning that the key must be rotated",
+        "The webhook signature finding (SEC-051, guided) is NOT applied; the run pauses before guided findings and says so",
+        "Findings outside security and seo (DAT-001, COMP-001) are untouched in code",
+        "findings.json marks SEC-035 and SEO-009 as pass with a commit sha and resolved timestamp",
+        "Each commit message references its finding ID in the form fix(<ID>): ...",
+        "No git add -A / stash / reset was used; only files the fix touched are in each commit",
+        "At the easy-first pause, report.md already reflects the easy-batch results (SEC-035 and SEO-009 shown as passed)",
+        "The run states that the guided finding SEC-051 is awaiting the user and lists it by ID"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "pre-launch check on this API service please. it's express + prisma, no frontend, and I can't run it locally right now",
+      "expected_output": "Stacks express+prisma. Static only. SEC-011 fail (orders/:id unscoped), SEC-038 fail ($queryRawUnsafe), SEC-035 fail (cors()), PAY-005 not applicable (payments false) or fail if payments detected via amount column, SEO and A11Y skipped or error with reasons, FLOW checks error: local tier unavailable. No crash.",
+      "files": [
+        "evals/fixtures/api-only"
+      ],
+      "assertions": [
+        "Detected stack is recorded as Express plus Prisma (config.yml or report)",
+        "Report flags GET /orders/:id returning any order without an ownership check as a failing finding",
+        "Report flags $queryRawUnsafe with string interpolation as a SQL injection finding",
+        "Report flags cors() with default (wildcard) origin as a failing finding",
+        "SEO and accessibility checks are marked skipped/not applicable/error with a reason, not reported as failures of the API",
+        "Runtime flow checks that could not be exercised are recorded with verified_by static or static-fallback (or status error), and none claims a runtime pass",
+        "The run completes and writes findings.json and report.md (no crash)",
+        "git status is clean outside .pre-launch/",
+        "At least 150 distinct check IDs are recorded in findings.json with a verified_by tier each",
+        "SEO-004/SEO-009-style page checks are recorded as error or skipped with a reason rather than pass, since no server ran",
+        "Measurement checks (PERF-001/011/015/016/018) are status error, not pass"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "I added a not-found page and moved the Stripe key to an env var since last time. Re-run the pre-launch audit and show me what changed.",
+      "expected_output": "SEO-009 and SEC-001 flip to pass with resolved set and first_seen preserved from 2026-09-03T12:00:00Z; delta line reports 2 resolved; other four still fail.",
+      "files": [
+        "evals/fixtures/broken-next-fixed-two"
+      ],
+      "assertions": [
+        "SEO-009 (not-found page) is now pass with a resolved timestamp",
+        "SEC-001 (hardcoded Stripe key) is now pass with a resolved timestamp",
+        "first_seen for SEO-009 and SEC-001 is preserved as 2026-09-03T12:00:00Z",
+        "The delta line reports 2 resolved",
+        "SEC-051, DAT-001, SEC-035 and COMP-001 remain fail",
+        "findings.json runs array has two entries (the previous audit plus this run)",
+        "git status is clean outside .pre-launch/",
+        "The summary notes that new findings include checks run for the first time (previous run covered fewer domains)",
+        "Every finding present in the previous findings.json retains its original first_seen value"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "/pre-launch compliance",
+      "expected_output": "Only compliance findings are updated; the six existing findings in other domains are carried forward unchanged; report shows domains: compliance for the latest run.",
+      "files": [
+        "evals/fixtures/broken-next-with-findings"
+      ],
+      "assertions": [
+        "Only the compliance domain ran: the latest run entry's domains is [\"compliance\"]",
+        "The six pre-existing findings in other domains are carried forward with their status and last_checked unchanged",
+        "COMP-001 (privacy policy) is still fail and new compliance findings are present (e.g. terms page missing)",
+        "report.md's latest-run line shows Domains: compliance",
+        "git status is clean outside .pre-launch/",
+        "Compliance findings carry last_checked equal to the new run's timestamp while all six prior findings keep last_checked 2026-09-03T12:00:00Z",
+        "At least 30 compliance check IDs (COMP-001..036) appear in findings.json with a status"
+      ]
+    }
   ]
 }
