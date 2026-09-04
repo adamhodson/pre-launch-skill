@@ -148,7 +148,7 @@ Every request has a `request_id` (`req_...`) in the error and in the response he
 Not applicable for this stack. One adjacent rule that belongs to COMP-022: **Stripe.js must be loaded from `https://js.stripe.com`, never bundled or self-hosted** — self-hosting it takes you out of the PCI scope reduction that the hosted script provides. If the app has a CSP, `js.stripe.com` needs to be in `script-src` and `api.stripe.com` in `connect-src`, with `frame-src` allowing `js.stripe.com` and `hooks.stripe.com` for 3DS challenge frames; a CSP that blocks those breaks payments in a way that only shows up on the live domain.
 
 ## known traps
-- Granting access on the success URL, or from a `?paid=true`-style parameter: PAY-018. The single most common real-money bug in indie SaaS, and it survives review because the redirect only happens after a real payment — but the URL is on the public internet and can be typed, bookmarked, and shared.
+- Granting access on the success URL, or from a `?paid=true`-style parameter: PAY-018. The redirect target is an ordinary public route — it can be typed, bookmarked, edited, and shared — so anything that writes entitlement there is writing it on a query parameter.
 - A success handler that retrieves the session but never reads `payment_status`, or reads it and writes anyway: PAY-018. And the opposite error, checking only for `"paid"` — `"no_payment_required"` is the second legitimate value, so a check on `"paid"` alone silently refuses every trial and every fully-discounted purchase.
 - Handling only `checkout.session.completed`: PAY-002. Everything that takes money back out arrives later.
 - Revoking on the wrong event: `customer.subscription.deleted` is the end of access; the user's click on "cancel" produces `customer.subscription.updated` with `cancel_at_period_end: true`, and revoking there cuts off a customer who has paid through the period (FLOW-005).
@@ -167,6 +167,9 @@ Not applicable for this stack. One adjacent rule that belongs to COMP-022: **Str
 - Test-mode price ids, portal configurations, or webhook endpoints referenced by a production deployment: REL-007. Test and live are separate object universes.
 - Calling `customers.create` on every checkout instead of reusing one customer per user: breaks the portal, PAY-015's trial control, and the webhook's lookup.
 - An unpinned `apiVersion`, or a webhook endpoint registered on a different API version than the SDK expects: REL-013 — the payload shape changes on Stripe's schedule.
+- Trials and renewals left untested because a month is a month: FLOW-007 — test clocks simulate the passage of time and fire the real events through your webhook. See "dev server".
+- Webhook delivery-failure alerting assumed absent: PAY-016 — Stripe retries, then disables a persistently failing endpoint and emails the account. It is on by default, so the finding is usually that the notification address is nobody's inbox. See "webhook handlers".
+- Dunning treated as something to build: PAY-006 — Smart Retries and the failed-payment customer emails are dashboard settings, so the retry schedule, the end-of-schedule behaviour, and whether those emails are on are read there rather than from the repo. Your side is `invoice.payment_failed`. See "background jobs".
 
 ## runtime probe hints
 **Confirm test mode before anything.** Read `STRIPE_SECRET_KEY` out of the running process (`printenv | grep -i stripe`) rather than out of a file, since the platform's value wins, and check the prefix: `sk_test_` / `rk_test_` / `pk_test_` is test mode, `sk_live_` is not. Write the determination down before the first request. If the classification is ambiguous, treat the keys as live and stop — every probe below spends real money against a live key.

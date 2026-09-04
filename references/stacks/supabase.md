@@ -59,7 +59,7 @@ Edge Functions have their own auth gate: the gateway verifies the caller's JWT b
 ## auth
 Users live in `auth.users`, which the app cannot query directly through PostgREST; the app's own profile data is conventionally a `public.profiles` table keyed on `id references auth.users(id)`, populated by an `on auth.users` insert trigger (grep migrations for `handle_new_user` or `create trigger` on `auth.users`). A `profiles` table needs its own RLS policies — it is a separate table and inherits nothing from `auth.users`.
 
-Inside SQL, the caller's identity is `auth.uid()` (the `sub` claim) and `auth.jwt()` (the whole claim set); `auth.role()` returns `anon`, `authenticated`, or `service_role`. Every policy predicate DAT-002 wants is a comparison of a column on *this row* to `auth.uid()`. `auth.role() = 'authenticated'` or `auth.uid() is not null` alone is not ownership — it grants every logged-in user access to every row, which is exactly the shape DAT-002 fails.
+Inside SQL, the caller's identity is `auth.uid()` (the `sub` claim) and `auth.jwt()` (the whole claim set). `auth.role()` and `auth.email()` are deprecated in favour of reading the claim directly — `auth.jwt() ->> 'role'` and `auth.jwt() ->> 'email'` — so a policy still calling them is worth a note; keep grepping for `auth.role() = 'authenticated'` regardless, because it is the fail pattern below and its deprecated spelling is the common one. Every policy predicate DAT-002 wants is a comparison of a column on *this row* to `auth.uid()`. `auth.role() = 'authenticated'` or `auth.uid() is not null` alone is not ownership — it grants every logged-in user access to every row, which is exactly the shape DAT-002 fails.
 
 **Server-side, `getUser()` is the auth check and `getSession()` is not** (SEC-010, and DAT-002 restates it). `getSession()` reads the session out of the cookie and returns it without contacting the auth server, and the cookie is client-writable, so a forged one passes. `getUser()` sends the token to `/auth/v1/user` and gets a verdict. Grep for `getSession()` in any server file, middleware, route handler, server action, or Edge Function that makes an authorization decision; on the client, where the session is the client's own, `getSession()` is fine.
 
@@ -244,7 +244,13 @@ curl -s -X POST "$SUPABASE_URL/rest/v1/<table>" \
   -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $JWT_B" \
   -H 'content-type: application/json' -H 'Prefer: return=representation' \
   -d '{"user_id":"<user A uuid>","title":"probe"}'
+# WITH CHECK, second case: as user B, update one of B's OWN rows to hand it to user A
+curl -s -X PATCH "$SUPABASE_URL/rest/v1/<table>?id=eq.<user B's own row id>" \
+  -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $JWT_B" \
+  -H 'content-type: application/json' -H 'Prefer: return=representation' \
+  -d '{"user_id":"<user A uuid>"}'
 ```
+Both writes must be rejected. The second is the one a read-only probe never reaches: an update policy with a `using` clause and no `with check` lets the owner rewrite the owner column, so B can push a row out of their own scope (or, with the ids reversed, claim one), and the select probes all pass while it is broken.
 `[]` with a 200 is the pass for the anon read; a populated array is the finding. Add `-i` and read the status when a write is expected to fail — an RLS refusal on a write is a `401`/`403` with a `42501` in the body.
 
 **Policy probes in `psql`**, which test the policy directly without needing the app at all. Wrap each in a transaction so the role and claims do not leak into the next probe:

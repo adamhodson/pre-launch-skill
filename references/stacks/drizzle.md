@@ -98,7 +98,7 @@ The third argument's shape changed across versions — older Drizzle returns an 
 
 **DAT-011 — pagination.** `.limit(n)` is the ceiling and `.offset(n)` or a cursor `where(gt(t.id, lastId))` is the next page; on the relational API it is `db.query.posts.findMany({ limit, offset })`. A `db.select().from(posts)` with no `.limit()` returns the whole table. Two Drizzle-specific traps: `db.query.*.findMany({ with: { comments: true } })` fetches every related row unless the nested relation gets its own `limit`, and `.limit()` applied after a join limits *rows*, not parent entities, so a one-to-many join with a limit silently truncates a parent's children. Clamp any caller-supplied page size before it reaches the query.
 
-**DAT-012 — batching.** `db.insert(t).values([row, row, row])` is one statement — the array form is the batched form, and a loop of `await db.insert(t).values(row)` is one round trip per row. `db.batch([...])` exists on the drivers that support it (libsql/Turso, D1) and sends several statements in one round trip; it is **not** a transaction on every driver, so do not read it as one for DAT-013. `Promise.all` over per-row inserts is concurrent, not batched, and exhausts the pool faster than the sequential version. Chunk large inserts at roughly a thousand rows to stay under the 65535 bind-parameter ceiling on Postgres.
+**DAT-012 — batching.** `db.insert(t).values([row, row, row])` is one statement — the array form is the batched form, and a loop of `await db.insert(t).values(row)` is one round trip per row. `db.batch([...])` exists on the drivers that support it and sends several statements in one round trip; **whether it is atomic depends on the driver** — libsql/Turso, Cloudflare D1, and the Neon HTTP driver run a batch as a transaction, and other drivers do not, so confirm against the one in use before reading it as a DAT-013 answer either way. `Promise.all` over per-row inserts is concurrent, not batched, and exhausts the pool faster than the sequential version. Chunk large inserts at roughly a thousand rows to stay under the 65535 bind-parameter ceiling on Postgres.
 
 **DAT-013 — transactions.**
 ```ts
@@ -157,7 +157,7 @@ Not applicable for this stack.
 - `db.select().from(t)` with no `.limit()`, or a `with:` relation in the relational API with no limit of its own: DAT-011.
 - A loop of awaited inserts instead of `values([...])`, or `Promise.all` over per-row writes: DAT-012.
 - Queries inside `db.transaction(async (tx) => ...)` issued on the outer `db`: they run outside the transaction and do not roll back. DAT-013.
-- `db.batch()` read as a transaction: on most drivers it is a batched round trip, not an atomic unit. DAT-013.
+- `db.batch()` assumed atomic without checking the driver: on libsql/Turso, Cloudflare D1, and the Neon HTTP driver a batch **is** run as a transaction, and elsewhere it is a batched round trip with no atomicity — confirm against the driver in use rather than assuming either way. A mixed read-then-write sequence that needs atomicity should use `db.transaction` on a driver that supports it. DAT-013.
 - `db.transaction` on a single-shot HTTP serverless driver, where it may not be a real transaction at all: DAT-013 — confirm against the driver's docs.
 - `sql.raw()` on anything user-influenced, or `db.execute()` given a concatenated string: SEC-038.
 - `drizzle-kit push` in a deploy, release, or CI path: no migration files, so nothing is replayable and nothing is reversible. DAT-015.
