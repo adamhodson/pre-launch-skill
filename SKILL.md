@@ -127,7 +127,7 @@ If the skill started the dev server, stop it. If the skill created the test acco
 
 ### 1. Load
 
-Read `PROJECT_DIR/.pre-launch/findings.json`. If it is missing, stop: "No findings yet. Run `/pre-launch` first." If the newest commit in the project is later than the last run's `at`, say the findings may be stale and continue.
+Read `PROJECT_DIR/.pre-launch/findings.json`. If it is missing, stop: "No findings yet. Run `/pre-launch` first." Compare the newest commit in the project against the `at` of the newest run in `runs` whose `domains` is not `["none"]` — that is the last real audit; the fix phase's own merger calls stamp runs with `domains: none` and would otherwise look like a fresh audit. If the commit is later, say the findings may be stale and continue.
 
 Then apply any attestation boxes the user ticked in `report.md`:
 
@@ -139,7 +139,7 @@ Then run `git status --porcelain` once. If the project already has uncommitted c
 
 ### 2. Queue
 
-Select findings with `status: fail` in the scoped domains. Split into **easy** (`fix: easy`) and **guided** (`fix: guided`); `fix: none` findings are not fixable here — list their IDs once and leave them alone. Print counts by group and severity, then ask one question:
+Select findings with `status: fail` in the scoped domains — no domain arguments means all domains. Split into **easy** (`fix: easy`) and **guided** (`fix: guided`); `fix: none` findings are not fixable here — list their IDs once and leave them alone. Print counts by group and severity, then ask one question:
 
 > How do you want to work through these?
 > 1. **All** — fix every easy finding without stopping, then walk the guided ones with me.
@@ -157,7 +157,7 @@ For each easy finding:
 3. Re-verify. Run the check's `verify` entry for the tier recorded in the finding's `verified_by`: `static`, `local`, or `remote` run that entry; `static-fallback` runs the `static` entry. If the tier is `local` and the server is not running, bring it up the way the audit phase does — `local.start` from the config normally, or a production build (`npm run build && PORT=<port> npm start` with `NODE_ENV=production`, or this stack's equivalent per the stack reference's "build" heading) when the check measures response headers, compression, or rendered markup, which is the rule the performance and SEO check-file headers state. Stop anything you started once the loop finishes, not between findings.
 4. **Verify passes:** stage only the files this fix touched — `git add <files>`, never `git add -A` — and commit `fix(<ID>): <title>`. No trailers; this is the user's project, not the skill's repo. Then set `status: pass`, `verified_by` unchanged, `resolved: <now>`, `commit: <sha>` in `findings.json`.
 5. **Verify fails:** revert the fix before moving on — `git checkout -- <the files you touched>` and delete any file you created — then set `status: error` and `notes: "fix attempted; re-verify failed: <reason>"` and continue. Never carry a half-applied fix into the next finding.
-6. **Tier cannot be brought up** (the server will not start, the production build fails, `remote.url` is unreachable): do not mark `pass` and do not guess. Keep the change, commit it as in step 4 so it does not bleed into the next finding, and leave `status: fail`, `resolved: null`, `commit: <sha>`, `notes: "fix applied; re-verify needs local tier"` (name the actual tier).
+6. **Tier cannot be brought up** (the server will not start, the production build fails, `remote.url` is unreachable): an unverified fix is never committed. Revert exactly as in step 5 — `git checkout -- <the files you touched>`, delete any file you created — and leave `status: fail`, `resolved: null`, no `commit`, and `notes: "fix deferred; re-verify needs <tier> — bring it up and re-run /pre-launch fix"`.
 
 After the batch print a table: ID, title, result. In mode 2 stop here and wait for the user to say continue.
 
@@ -173,13 +173,19 @@ Legal-text findings are never edited in place: **COMP-001, COMP-002, COMP-003, C
 
 ### 5. Wrap
 
-Re-run the merger command from step 1 to regenerate the report from your edited `findings.json`, and print the delta line it prints. List the IDs of any guided findings still open and any `attest` findings still unticked. Recommend a full `/pre-launch` once that list is clear, because fixes shift other findings.
+Re-run the merger command from step 1 to regenerate `report.md` from your edited `findings.json`. Ignore the delta line it prints and never quote it here: that delta counts only findings merged from domain files, and this call merges none, so it always reads 0 resolved.
+
+Report your own tally instead, kept as you went through the loops:
+
+> This session: N fixed and committed, N deferred (tier unavailable), N failed re-verify, N skipped, N guided remaining, N attest remaining.
+
+Then print the report path, and list the IDs of the guided findings still open and the `attest` findings still unticked. Recommend a full `/pre-launch` once that list is clear, because fixes shift other findings.
 
 ### What the fix phase never does
 
 - Never changes a finding whose status is `attest`. Those are the user's to tick in `report.md`; the merger applies the ticks.
 - Never touches a finding outside the scoped domains, even when the fix is obvious and one line.
-- Never leaves a partially applied fix: a re-verify that runs and fails is reverted.
+- Never leaves a partially applied fix and never commits one whose verify did not run and pass: a failed re-verify and a tier that will not come up are both reverted.
 - Never puts two findings in one commit, and never runs `git add -A`, `git stash`, or `git reset`.
 - Never auto-applies a guided finding, in any mode.
 - Never edits `PROJECT_DIR/.pre-launch/config.yml` or any file under `SKILL_DIR/references/checks/`. The config is the audit's input and the check files are the skill's; a fix that seems to need either is a finding to report, not a file to change.
