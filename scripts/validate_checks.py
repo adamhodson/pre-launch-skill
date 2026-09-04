@@ -18,7 +18,7 @@ STACK_HEADINGS = [
 ]
 HEAD_RE = re.compile(r"^### ([A-Z0-9]+-\d{3}) (.+)$", re.M)
 ROW_RE = re.compile(r"^\| ([A-Z0-9]+-\d{3}) \| (.+?) \| ([CHML]) \| ([SLRA]) \| ([EG—-]) \|(?: (.*?) \|)?", re.M)
-FLOW_ROW_RE = re.compile(r"^\| (FLOW-\d{3}) \| (.+?) \| ([CHML]) \| (.*?) \|", re.M)
+FLOW_ROW_RE = re.compile(r"^\| (FLOW-\d{3}) \| (.+?) \| ([CHML]) \|\s*(.*?)\s*\|", re.M)
 
 
 def parse_checks(text):

@@ -54,3 +54,18 @@ def test_validate_stack_headings(tmp_path):
     spec = tmp_path / "spec.md"; spec.write_text("")
     errs = validate(checks, stacks, spec)
     assert any("nextjs.md" in e and "dev server" in e for e in errs)
+
+FLOW_SPEC = textwrap.dedent("""
+    ### 8.9 User flows (FLOW)
+    | ID | Check | Sev | when |
+    |---|---|---|---|
+    | FLOW-001 | Fresh sign-up end-to-end; verification email received | C | |
+    | FLOW-004 | Test-mode checkout → webhook received → entitlement granted | C | features.payments |
+""")
+
+def test_spec_ids_parses_flow_rows_with_empty_when():
+    ids = spec_ids(FLOW_SPEC)
+    assert ids["FLOW-001"]["tier"] == "local" and ids["FLOW-001"]["fix"] == "guided"
+    assert ids["FLOW-001"]["when"] is None
+    assert ids["FLOW-004"]["tier"] == "local" and ids["FLOW-004"]["fix"] == "guided"
+    assert ids["FLOW-004"]["when"] == "features.payments"
