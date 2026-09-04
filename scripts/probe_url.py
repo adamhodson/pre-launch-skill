@@ -23,11 +23,11 @@ class Page(HTMLParser):
             if name == "description": self.description = content
             if prop.startswith("og:"): self.og[prop] = content
             if name.startswith("twitter:"): self.twitter[name] = content
-        elif tag == "link" and a.get("rel") == "canonical": self.canonical = a.get("href")
+        elif tag == "link" and "canonical" in a.get("rel", "").split(): self.canonical = a.get("href")
         elif tag == "script" and a.get("type") == "application/ld+json": self._in_ld = True; self._buf = ""
         elif tag == "h1": self.h1_count += 1
         elif tag == "a" and a.get("href"): self.links.append(a["href"])
-        elif tag == "img" and not a.get("alt"): self.images_without_alt += 1
+        elif tag == "img" and "alt" not in a: self.images_without_alt += 1
 
     def handle_data(self, data):
         if self._in_title or self._in_ld: self._buf += data
@@ -63,7 +63,7 @@ def probe(base_url, timeout=10.0):
         status, headers, body, redirects = fetch(base + path, timeout)
         text = body.decode("utf-8", "replace")
         entry = {"status": status, "headers": headers, "redirects": redirects}
-        if path == "/" and status == 200:
+        if path == "/":
             p = Page(); p.feed(text)
             entry.update(title=p.title, description=p.description, canonical=p.canonical, lang=p.lang,
                          og=p.og, twitter=p.twitter, jsonld=p.jsonld, h1_count=p.h1_count,
