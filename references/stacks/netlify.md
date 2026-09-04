@@ -341,11 +341,12 @@ A 401 with a basic-auth or password challenge means protection is on. A 200 with
 **Function ceiling and payload limit, measured rather than assumed** (against a deploy preview, never production, and only on an endpoint safe to call):
 ```bash
 curl -s -o /dev/null -w 'status=%{http_code} total=%{time_total}\n' https://<preview>/.netlify/functions/<a slow but safe function>
-head -c 7000000 /dev/zero | tr '\0' 'a' > /tmp/big.txt
+head -c 7000000 /dev/zero | tr '\0' 'a' > .pre-launch/probe-body.bin
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<preview>/.netlify/functions/<upload> \
-  -H 'content-type: text/plain' --data-binary @/tmp/big.txt
+  -H 'content-type: text/plain' --data-binary @.pre-launch/probe-body.bin
+rm -f .pre-launch/probe-body.bin
 ```
-Record the observed numbers alongside the documented ones and say which is which.
+Record the observed numbers alongside the documented ones and say which is which. Delete the probe body afterwards, as the last line does.
 
 **Job endpoints (SEC-014).** Two probes. First, confirm the scheduled function is not publicly invocable:
 ```bash

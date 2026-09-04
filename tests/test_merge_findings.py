@@ -56,3 +56,33 @@ def test_ticks_apply_to_carried_forward_findings():
     new = merge(prev, [], {"SEC-024"}, RUN, "2026-09-04T10:00:00Z")
     x = new["findings"][0]
     assert x["status"] == "pass" and x["verified_by"] == "attested" and x["last_checked"] == "2026-09-04T10:00:00Z"
+
+def _run(tmp, *args):
+    import subprocess, os
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "merge_findings.py"
+    return subprocess.run([sys.executable, str(script), "--dir", str(tmp), *args],
+                          capture_output=True, text=True)
+
+def test_bad_domain_file_is_skipped(tmp_path):
+    import json
+    (tmp_path / "findings").mkdir()
+    (tmp_path / "findings" / "aaa-good.json").write_text(json.dumps([f("SEC-001", "fail")]))
+    (tmp_path / "findings" / "bad.json").write_text('[{"id": "SEC-002",')  # truncated
+    r = _run(tmp_path, "--domains", "security", "--tiers", "static")
+    assert r.returncode == 0, r.stderr
+    assert "skipped" in r.stderr and "bad.json" in r.stderr
+    doc = json.loads((tmp_path / "findings.json").read_text())
+    assert [x["id"] for x in doc["findings"]] == ["SEC-001"]
+
+def test_domains_none_records_no_run(tmp_path):
+    import json
+    prev = {"version": 1, "project": "p", "runs": [RUN], "findings": [f("SEC-024", "attest")]}
+    (tmp_path / "findings.json").write_text(json.dumps(prev))
+    (tmp_path / "report.md").write_text("- [x] SEC-024 MFA — evidence: none\n")
+    r = _run(tmp_path, "--domains", "none", "--tiers", "none")
+    assert r.returncode == 0, r.stderr
+    doc = json.loads((tmp_path / "findings.json").read_text())
+    assert doc["runs"] == [RUN]                                  # no fake run appended
+    assert doc["findings"][0]["status"] == "pass"                # ticks still applied
+    assert "# Pre-Launch Report" in (tmp_path / "report.md").read_text()  # still re-rendered
+    assert len(merge(prev, [], set(), RUN, "2026-09-04T10:00:00Z")["runs"]) == 2  # record_run default

@@ -367,13 +367,14 @@ wrangler tail --env preview --format=json --status=error       # watch for 1102 
 ```
 A `1102` in the tail output is the ceiling being hit. Record the observed behaviour alongside the documented limit and say which is which.
 
-**Body limit.**
+**Body limit.** Opt-in: ask before generating a file this large.
 ```bash
-head -c 120000000 /dev/zero | tr '\0' 'a' > /tmp/big.txt      # just over 100 MB
+head -c 120000000 /dev/zero | tr '\0' 'a' > .pre-launch/probe-body.bin   # just over 100 MB
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<preview>/api/<upload> \
-  -H 'content-type: text/plain' --data-binary @/tmp/big.txt
+  -H 'content-type: text/plain' --data-binary @.pre-launch/probe-body.bin
+rm -f .pre-launch/probe-body.bin
 ```
-A 413 from Cloudflare rather than your handler confirms the zone limit. Delete the file afterwards.
+A 413 from Cloudflare rather than your handler confirms the zone limit. Delete the file afterwards, as the last line does.
 
 **Job endpoints (SEC-014).** A Cron Trigger has no public URL, so there is nothing to probe — record that as the mechanism. For any HTTP job path, call it with no `Authorization` header and expect 401:
 ```bash

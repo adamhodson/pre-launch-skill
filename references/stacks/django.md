@@ -187,8 +187,8 @@ CORS: `django-cors-headers` with `corsheaders.middleware.CorsMiddleware` high in
 **Session cookie for `curl`.** Django's login is a form POST guarded by CSRF, so it needs the `csrftoken` cookie, the matching `csrfmiddlewaretoken` field, and a `Referer` that satisfies the origin check when the request is HTTPS:
 ```bash
 JAR=.pre-launch/flows/cookies.txt
-curl -s -c "$JAR" http://localhost:8100/accounts/login/ -o /tmp/login.html
-TOKEN=$(grep -o 'name="csrfmiddlewaretoken" value="[^"]*"' /tmp/login.html | head -1 | sed 's/.*value="//;s/"$//')
+curl -s -c "$JAR" http://localhost:8100/accounts/login/ -o .pre-launch/flows/login.html
+TOKEN=$(grep -o 'name="csrfmiddlewaretoken" value="[^"]*"' .pre-launch/flows/login.html | head -1 | sed 's/.*value="//;s/"$//')
 curl -s -b "$JAR" -c "$JAR" -X POST http://localhost:8100/accounts/login/ \
   -H 'Referer: http://localhost:8100/accounts/login/' \
   --data-urlencode "csrfmiddlewaretoken=$TOKEN" \

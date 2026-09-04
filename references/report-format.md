@@ -56,7 +56,7 @@ Counts by severity × status table.
 
 ## Security
 ### Open
-one line per finding: **SEC-051** Webhook signature verification — critical — fail — <evidence first line>
+one line per finding: **SEC-051** Webhook signature verification — <severity> — <fix> — <evidence first line>
 ### Attestation
 - [ ] SEC-024 MFA available for admin accounts — evidence: <what was found>
 ### Passed (collapsed list of IDs)

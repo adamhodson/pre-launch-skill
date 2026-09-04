@@ -291,11 +291,12 @@ A 401 with a Vercel SSO page means Deployment Protection is on. A 200 with your 
 # duration: how long before the platform cuts it off
 curl -s -o /dev/null -w 'status=%{http_code} total=%{time_total}\n' https://<preview>/api/<a slow but safe endpoint>
 # body ceiling: a body just over the documented limit should be rejected at the edge, before the handler
-head -c 5000000 /dev/zero | tr '\0' 'a' > /tmp/big.txt
+head -c 5000000 /dev/zero | tr '\0' 'a' > .pre-launch/probe-body.bin
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<preview>/api/<an upload endpoint> \
-  -H 'content-type: text/plain' --data-binary @/tmp/big.txt
+  -H 'content-type: text/plain' --data-binary @.pre-launch/probe-body.bin
+rm -f .pre-launch/probe-body.bin
 ```
-A 413 with no application error in the logs confirms the edge rejected it. Record the observed numbers alongside the documented ones and say which is which.
+A 413 with no application error in the logs confirms the edge rejected it. Delete the probe body afterwards, as the last line does. Record the observed numbers alongside the documented ones and say which is which.
 
 **Cron secret (SEC-014).** The negative probe is safe and needs no credentials — call the cron path with no `Authorization` header and expect 401:
 ```bash

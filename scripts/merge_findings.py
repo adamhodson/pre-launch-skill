@@ -15,7 +15,7 @@ def read_ticks(report_md):
     return set(TICK_RE.findall(report_md or ""))
 
 
-def merge(previous, domain_findings, ticked_ids, run, now):
+def merge(previous, domain_findings, ticked_ids, run, now, record_run=True):
     prev = {x["id"]: x for x in (previous or {}).get("findings", [])}
     out = dict(prev)
     delta = {"resolved": 0, "new": 0, "regressed": 0}
@@ -45,7 +45,7 @@ def merge(previous, domain_findings, ticked_ids, run, now):
             x["status"], x["verified_by"], x["last_checked"] = "pass", "attested", now
             out[fid] = x
     doc = {"version": 1, "project": (previous or {}).get("project", Path.cwd().name),
-           "runs": list((previous or {}).get("runs", [])) + [run],
+           "runs": list((previous or {}).get("runs", [])) + ([run] if record_run else []),
            "findings": sorted(out.values(), key=lambda x: (DOMAIN_ORDER.index(x["domain"]) if x["domain"] in DOMAIN_ORDER else 99,
                                                            SEV_ORDER.get(x["severity"], 9), x["id"]))}
     doc["delta"] = delta
@@ -93,9 +93,12 @@ def main():
     ticks = read_ticks((d / "report.md").read_text()) if (d / "report.md").exists() else set()
     domain_findings = []
     for f in sorted((d / "findings").glob("*.json")):
-        domain_findings += json.loads(f.read_text())
+        try:
+            domain_findings += json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"skipped {f}: {e}", file=sys.stderr)
     run = {"at": now, "domains": a.domains.split(","), "tiers": a.tiers.split(",")}
-    doc = merge(prev, domain_findings, ticks, run, now)
+    doc = merge(prev, domain_findings, ticks, run, now, record_run=a.domains != "none")
     d.mkdir(parents=True, exist_ok=True)
     (d / "findings.json").write_text(json.dumps(doc, indent=2))
     (d / "report.md").write_text(render(doc))
