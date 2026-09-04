@@ -122,3 +122,64 @@ If the skill started the dev server, stop it. If the skill created the test acco
 - If a subagent fails outright, note it, mark its checks `error: auditor did not complete` by writing a domain file with those entries before merging, and continue.
 
 ## Fix phase
+
+`/pre-launch fix [domains...]`
+
+### 1. Load
+
+Read `PROJECT_DIR/.pre-launch/findings.json`. If it is missing, stop: "No findings yet. Run `/pre-launch` first." If the newest commit in the project is later than the last run's `at`, say the findings may be stale and continue.
+
+Then apply any attestation boxes the user ticked in `report.md`:
+
+    python3 SKILL_DIR/scripts/merge_findings.py --dir PROJECT_DIR/.pre-launch --domains none --tiers none
+
+The `findings/` directory does not have to exist. The script globs it, finds no domain files, merges nothing new, flips every carried-forward `attest` finding whose box is ticked to `status: pass` / `verified_by: attested`, rewrites `findings.json` and `report.md`, and prints the delta line. Re-read `findings.json` afterwards and work from that copy.
+
+Then run `git status --porcelain` once. If the project already has uncommitted changes, say so — "the working tree already has changes; each fix commit will stage only the files that fix touches" — and continue. Never stash, reset, or check out anything you did not write yourself. If the project is not a git repo, warn once and run the whole phase without commits.
+
+### 2. Queue
+
+Select findings with `status: fail` in the scoped domains. Split into **easy** (`fix: easy`) and **guided** (`fix: guided`); `fix: none` findings are not fixable here — list their IDs once and leave them alone. Print counts by group and severity, then ask one question:
+
+> How do you want to work through these?
+> 1. **All** — fix every easy finding without stopping, then walk the guided ones with me.
+> 2. **Easy first** — same, but pause after the easy batch so you can review before the guided walk.
+> 3. **One by one** — confirm every change, including easy ones.
+
+Ordering within a group: critical, high, medium, low, then by ID.
+
+### 3. Easy loop (modes 1 and 2; in mode 3 every finding goes through step 4 instead)
+
+For each easy finding:
+
+1. Read its block in `SKILL_DIR/references/checks/<domain>.md` and the stack headings its `fix_hint` names.
+2. Make the smallest change that satisfies the check. Do not refactor around it.
+3. Re-verify. Run the check's `verify` entry for the tier recorded in the finding's `verified_by`: `static`, `local`, or `remote` run that entry; `static-fallback` runs the `static` entry. If the tier is `local` and the server is not running, bring it up the way the audit phase does — `local.start` from the config normally, or a production build (`npm run build && PORT=<port> npm start` with `NODE_ENV=production`, or this stack's equivalent per the stack reference's "build" heading) when the check measures response headers, compression, or rendered markup, which is the rule the performance and SEO check-file headers state. Stop anything you started once the loop finishes, not between findings.
+4. **Verify passes:** stage only the files this fix touched — `git add <files>`, never `git add -A` — and commit `fix(<ID>): <title>`. No trailers; this is the user's project, not the skill's repo. Then set `status: pass`, `verified_by` unchanged, `resolved: <now>`, `commit: <sha>` in `findings.json`.
+5. **Verify fails:** revert the fix before moving on — `git checkout -- <the files you touched>` and delete any file you created — then set `status: error` and `notes: "fix attempted; re-verify failed: <reason>"` and continue. Never carry a half-applied fix into the next finding.
+6. **Tier cannot be brought up** (the server will not start, the production build fails, `remote.url` is unreachable): do not mark `pass` and do not guess. Keep the change, commit it as in step 4 so it does not bleed into the next finding, and leave `status: fail`, `resolved: null`, `commit: <sha>`, `notes: "fix applied; re-verify needs local tier"` (name the actual tier).
+
+After the batch print a table: ID, title, result. In mode 2 stop here and wait for the user to say continue.
+
+### 4. Guided loop
+
+For each guided finding, show ID, title, severity, evidence, recommendation, and a concrete proposal — a diff for code changes, a written plan for config, DNS, or dashboard changes you cannot make yourself. Ask: **yes / edit / skip**.
+
+- **yes** — apply it, then re-verify, commit, and update the finding exactly as steps 3.3 through 3.6 describe.
+- **edit** — take the user's changes and re-propose. Nothing is applied until they say yes.
+- **skip** — leave `status: fail` and record any reason the user gives in `notes`.
+
+Legal-text findings are never edited in place: **COMP-001, COMP-002, COMP-003, COMP-004, COMP-005, COMP-009, COMP-012, COMP-016, COMP-029, COMP-030.** For these, write a draft to `PROJECT_DIR/.pre-launch/drafts/<ID>.md` (create the directory if needed) containing the proposed text, the evidence from the finding that drove each part of it — the SDK, the data flow, the pricing page, the file:line — and the line "Not legal advice; review with counsel." Tell the user where the draft is, and leave the finding `status: fail` until they confirm the text is published.
+
+### 5. Wrap
+
+Re-run the merger command from step 1 to regenerate the report from your edited `findings.json`, and print the delta line it prints. List the IDs of any guided findings still open and any `attest` findings still unticked. Recommend a full `/pre-launch` once that list is clear, because fixes shift other findings.
+
+### What the fix phase never does
+
+- Never changes a finding whose status is `attest`. Those are the user's to tick in `report.md`; the merger applies the ticks.
+- Never touches a finding outside the scoped domains, even when the fix is obvious and one line.
+- Never leaves a partially applied fix: a re-verify that runs and fails is reverted.
+- Never puts two findings in one commit, and never runs `git add -A`, `git stash`, or `git reset`.
+- Never auto-applies a guided finding, in any mode.
+- Never edits `PROJECT_DIR/.pre-launch/config.yml` or any file under `SKILL_DIR/references/checks/`. The config is the audit's input and the check files are the skill's; a fix that seems to need either is a finding to report, not a file to change.
