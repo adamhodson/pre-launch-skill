@@ -96,7 +96,7 @@ app.post('/webhooks/stripe',
     res.status(200).send('ok')
   })
 ```
-`req.body` here is the raw `Buffer` because of `express.raw`, which is exactly what `constructEvent` needs; it enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. For other providers, see that provider's stack file; the raw-body rule is the same.
+`req.body` here is the raw `Buffer` because of `express.raw`, which is exactly what `constructEvent` needs; it enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. This is the shape verification takes on this stack, not a file to drop in: the path, the queue call, and where the route is registered relative to the global body parser are the project's own — and that registration order is the thing to check, since everything else can look right while the parser upstream has already destroyed the bytes. For other providers, see that provider's stack file; the raw-body rule is the same.
 
 ## data access
 Whatever the project installed. Identify it from `package.json`, then locate the connection module (`db.js`, `src/db/index.ts`, `lib/prisma.ts`, `models/`).

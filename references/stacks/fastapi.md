@@ -109,13 +109,13 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.stripe_webhook_secret
         )
-    except (ValueError, stripe.error.SignatureVerificationError):
+    except (ValueError, stripe.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="bad signature")
 
     await enqueue_stripe_event(event["id"], event["type"])   # a real queue, not BackgroundTasks
     return Response(status_code=200)
 ```
-`stripe.Webhook.construct_event` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. For other providers, see that provider's stack file; the raw-body rule is the same.
+`stripe.SignatureVerificationError` is the modern path; older code raises `stripe.error.SignatureVerificationError` from the legacy `stripe.error` module, which still resolves in current releases — match whichever the project's pinned version uses rather than rewriting it. `stripe.Webhook.construct_event` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. This is the shape verification takes on this stack, not a file to drop in: the router, the settings accessor, and the enqueue call are the project's own. For other providers, see that provider's stack file; the raw-body rule is the same.
 
 ## data access
 SQLAlchemy is the usual choice, in one of two shapes that behave very differently:
@@ -168,7 +168,7 @@ FastAPI's **default** behaviour is safe: an unhandled exception produces `{"deta
 - A custom `@app.exception_handler(Exception)` returning `{"detail": str(exc)}` or `traceback.format_exc()` (SEC-009).
 - `uvicorn --reload` in production, which prints tracebacks liberally.
 
-Handlers: `@app.exception_handler(HTTPException)`, `@app.exception_handler(RequestValidationError)`, `@app.exception_handler(Exception)`. Note that a `RequestValidationError` response (422) **echoes the submitted input back** in the `input` field of each error entry — usually harmless, but a password or a token submitted to a route that then fails validation appears in the response body and in whatever logged it (REL-015). A custom validation handler that returns only the field names and messages avoids that.
+Handlers: `@app.exception_handler(HTTPException)`, `@app.exception_handler(RequestValidationError)`, `@app.exception_handler(Exception)`. Note that a `RequestValidationError` response (422) **echoes the submitted input back** in the `input` field of each error entry under Pydantic v2 — v1-era FastAPI returned `loc`, `msg`, and `type` without the offending value, so check the Pydantic version before reporting this — usually harmless, but a password or a token submitted to a route that then fails validation appears in the response body and in whatever logged it (REL-015). A custom validation handler that returns only the field names and messages avoids that.
 
 `HTTPException(status_code=..., detail=...)` is the intentional-error mechanism; a `detail` built from an exception message reintroduces the leak.
 
@@ -188,7 +188,7 @@ Starlette middleware worth finding:
 - `TrustedHostMiddleware(allowed_hosts=[...])` — the `ALLOWED_HOSTS` equivalent, and its absence means the app will answer to any `Host` header and build absolute URLs from it (SEC-022).
 - `HTTPSRedirectMiddleware` (SEC-034).
 - `GZipMiddleware` (PERF-003) — not enabled by default.
-- `CORSMiddleware` — `allow_origins=["*"]` together with `allow_credentials=True` is SEC-035. Browsers refuse that exact combination, which is why the workaround people reach for, `allow_origin_regex=".*"` or a middleware echoing the request's `Origin` back, is the finding that actually bites: it is a credentialed wildcard that works.
+- `CORSMiddleware` — `allow_origins=["*"]` together with `allow_credentials=True` is SEC-035, and it is a *working* credentialed wildcard rather than a misconfiguration browsers reject. Starlette does not send the literal `*` in that case: `CORSMiddleware` detects the combination and responds with the request's own `Origin` echoed back alongside `Access-Control-Allow-Credentials: true` (the comment in `starlette/middleware/cors.py` reads "If credentials are allowed, then we must respond with the specific origin instead of `*`"). So the browser accepts it and any site can make credentialed cross-origin requests to the API. `allow_origin_regex=".*"` and a hand-written middleware reflecting `Origin` are the same bug written differently, not workarounds for a blocked one — treat all three identically.
 
 Rate limiting: nothing built in. `slowapi` (a `Limiter` keyed on `get_remote_address`) or the proxy's. `get_remote_address` reads `request.client.host`, which behind a proxy is the proxy — uvicorn's `--proxy-headers` with `--forwarded-allow-ips` is what makes `X-Forwarded-For` trusted, and trusting it from anywhere lets a client rotate its own limit key (SEC-016).
 
@@ -197,7 +197,7 @@ Rate limiting: nothing built in. `slowapi` (a `Limiter` keyed on `get_remote_add
 - A path operation with no `Depends(get_current_user)` on a router included without `dependencies=[...]` — check with the `security == null` jq filter above and confirm each hit in the source: SEC-010, SEC-012.
 - `sqladmin`'s `Admin(app, engine)` mounted with no `authentication_backend`: `/admin` is unauthenticated CRUD over every model (SEC-012, SEC-013).
 - `jwt.decode` with no `algorithms=[...]` pinned, or `options={"verify_signature": False}`, or a token whose `role` claim is never re-checked against the database: SEC-027, SEC-012.
-- `CORSMiddleware(allow_origins=["*"], allow_credentials=True)`, or `allow_origin_regex=".*"`, or a middleware reflecting the request `Origin`: SEC-035.
+- `CORSMiddleware(allow_origins=["*"], allow_credentials=True)`, `allow_origin_regex=".*"`, or a middleware reflecting the request `Origin`: all three are one bug. Starlette echoes the specific origin when credentials are allowed, so this works in the browser rather than being rejected — SEC-035.
 - `text(f"...")`, `session.execute(f"...")`, or any SQL built by formatting: SEC-038. `order_by` built from a query parameter: SEC-040.
 - A request schema that mirrors the ORM model, or SQLModel used as both the table and the request body: SEC-041. The same class as `response_model`, or no `response_model` at all: SEC-042.
 - A handler taking `payload: dict`, `payload: Any`, or reading `await request.json()` directly, so nothing is validated: SEC-037.
@@ -206,7 +206,7 @@ Rate limiting: nothing built in. `slowapi` (a `Limiter` keyed on `get_remote_add
 - `UploadFile` with no size check anywhere, or a parameter declared `bytes = File(...)`: SEC-067, SEC-047.
 - No `TrustedHostMiddleware` behind a proxy that forwards the client's `Host`: SEC-022.
 - `FastAPI(debug=True)` in production, or an exception handler returning `str(exc)`: SEC-008, SEC-009.
-- The default `RequestValidationError` response echoing submitted values back, on a route that takes a password or token: REL-015.
+- The default `RequestValidationError` response echoing submitted values back (Pydantic v2 shape — check the version), on a route that takes a password or token: REL-015.
 - A `Settings` field with a default on a secret, a signing key, or an allowed-origins list: REL-008, and SEC-001 if the default is a real-looking value.
 - A list endpoint with no `limit` ceiling: DAT-011.
 - `alembic.ini` committed with a real production password in `sqlalchemy.url`: SEC-006.

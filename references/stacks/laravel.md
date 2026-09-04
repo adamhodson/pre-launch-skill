@@ -13,10 +13,12 @@ Everything below names both locations where they differ. Frontend: `vite.config.
 Never measure headers, caching, error bodies, or performance against `artisan serve` with `APP_ENV=local` — the error page, the debug bar, and the config cache all differ. See "build".
 
 ## build
-1. `composer install --no-dev --optimize-autoloader` (use `--no-interaction` and the committed `composer.lock` for HYG-015's clean clone; note that `--no-dev` drops Telescope, Debugbar, and Ignition's dev features, which is part of why production behaves differently).
+1. `composer install --no-dev --optimize-autoloader --no-interaction` against the committed `composer.lock` for HYG-015's clean clone; note that `--no-dev` drops Telescope, Debugbar, and Ignition's dev features, which is part of why production behaves differently. The **declared runtime** HYG-015 compares against is `require.php` in `composer.json` (and the `config.platform.php` override if one is set), `.tool-versions`, or the Dockerfile base image — record the `php -v` you actually built with beside it, and note the Node version from `engines`/`.nvmrc` for the Vite half.
 2. `npm ci && npm run build` → Vite → `public/build/` with `public/build/manifest.json`. `build.sourcemap` in `vite.config.js` decides whether `.map` files land there (SEC-007).
 3. Production caches: `php artisan config:cache`, `php artisan route:cache`, `php artisan view:cache`, `php artisan event:cache` — or `php artisan optimize`, which runs the lot. `php artisan optimize:clear` reverses it.
 4. Run: `APP_ENV=production APP_DEBUG=false php artisan serve --port=8100` is adequate for local-tier probing; the real deployment is php-fpm or Octane behind nginx. `php artisan about` prints the environment, debug flag, cache states, and driver selections in one table and is worth capturing as evidence.
+
+**This build writes into the tree.** `npm run build` creates `public/build/`, and the `optimize` caches write `bootstrap/cache/config.php`, `routes-v7.php`, `events.php`, and compiled views into `storage/framework/views/`. All of it shows up in `git status` and, worse, a stale `bootstrap/cache/config.php` left behind changes how the app reads its own environment for every later check. Reverse it with `php artisan optimize:clear`. HYG-015's own run must happen in a throwaway clone rather than in the project directory precisely for this reason — follow that rule there, and if you cached config in the project tree to run a production-mode server, clear it afterwards and say you did.
 
 Two things other domains ask of this section. Compression (PERF-003) comes from nginx, Cloudflare, or the platform — Laravel ships no compression middleware. Deployment shape (PERF-016): Laravel normally runs under php-fpm or Octane as a long-lived process pool, so there is no cold start to measure and that check is `n/a — long-lived process`; say so rather than leaving it blank, and defer to the platform's stack file if it is deployed scale-to-zero.
 
@@ -95,7 +97,7 @@ public function handle(Request $request)
     return response('ok', 200);
 }
 ```
-`Webhook::constructEvent` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. For other providers, see that provider's stack file; the raw-body rule is the same.
+`Webhook::constructEvent` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. This is the shape verification takes on this stack, not a file to drop in: the controller, the config key, and the dispatch call are the project's own, and an app using Cashier gets this controller from the package instead — check `config/cashier.php` and the webhook secret rather than expecting to find this code. For other providers, see that provider's stack file; the raw-body rule is the same.
 
 ## data access
 Eloquent. Models `app/Models/`, migrations `database/migrations/`, factories `database/factories/`, seeders `database/seeders/`. Connections in `config/database.php` driven by `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`. There is no schema dump by default unless the project ran `php artisan schema:dump`, which writes `database/schema/<connection>-schema.sql` — the migration set is otherwise the schema.
@@ -128,7 +130,7 @@ Validation (SEC-047, SEC-049): `$request->validate(['file' => 'required|file|mim
 `app/Jobs/`, dispatched with `dispatch(new SendInvoice($id))` or `SendInvoice::dispatch($id)`, `->onQueue('emails')`, `->delay(...)`.
 
 `QUEUE_CONNECTION` in `.env` and `config/queue.php` decides everything:
-- **`sync`** — the default in a fresh `.env`. The job runs inline, in the request, before the response is sent. A `dispatch()` call with `QUEUE_CONNECTION=sync` in production is PERF-013 no matter how the code reads.
+- **`sync`** — the job runs inline, in the request, before the response is sent; a `dispatch()` call under `sync` is PERF-013 no matter how the code reads. It is `config/queue.php`'s fallback (`env('QUEUE_CONNECTION', 'sync')`), so it is what you get when the variable is unset — but it is not necessarily what the skeleton ships: Laravel 10 and earlier generate `QUEUE_CONNECTION=sync` in `.env.example`, and Laravel 11+ generate `QUEUE_CONNECTION=database`. Read the actual value in the running environment (`php artisan about` shows it) rather than either default.
 - `database` — a `jobs` table, worker `php artisan queue:work`.
 - `redis` — worker `php artisan queue:work`, or **Horizon** (`php artisan horizon`, dashboard `/horizon`, config `config/horizon.php`).
 - `sqs`, `beanstalkd`.

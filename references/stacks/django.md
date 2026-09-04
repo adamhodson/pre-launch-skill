@@ -8,12 +8,14 @@
 
 ## build
 There is no bundler for the Python side. The production sequence is:
-1. `pip install -r requirements.txt` (or `poetry install --no-dev`, `uv sync --frozen`, `pipenv install --deploy`) — use the locked form for HYG-015's clean clone.
+1. `pip install -r requirements.txt` (or `poetry install --only main` — `--no-dev` was deprecated in Poetry 1.2 and removed later — `uv sync --frozen`, `pipenv install --deploy`). Use the locked form for HYG-015's clean clone: a `requirements.txt` with pinned versions, `requirements.lock`, `poetry.lock`, `uv.lock`, or `Pipfile.lock`; an unpinned requirements file is itself a finding, since the clean build resolves differently from the one that shipped. The **declared runtime** HYG-015 compares against is `.python-version`, `requires-python` in `pyproject.toml`, `.tool-versions`, `runtime.txt`, or the Dockerfile base image — record the version you actually built with beside it.
 2. `DJANGO_SETTINGS_MODULE=<project>.settings.production python manage.py collectstatic --noinput` → `STATIC_ROOT`. Whitenoise (`whitenoise.middleware.WhiteNoiseMiddleware` in `MIDDLEWARE`) serves that directory from the app process; otherwise a web server or CDN does. `STORAGES["staticfiles"]` set to `ManifestStaticFilesStorage` adds content hashes and is what makes PERF-004's immutable caching possible — Django 4.2+ uses the `STORAGES` dict, earlier versions use `STATICFILES_STORAGE` and `DEFAULT_FILE_STORAGE`; check the version.
 3. `python manage.py migrate` (DAT-015 owns whether this is safe to run; do not run it against the project's own database as part of the audit).
 4. Serve: `DJANGO_SETTINGS_MODULE=<project>.settings.production gunicorn <project>.wsgi:application --bind 127.0.0.1:8100 --workers 3`, or `uvicorn <project>.asgi:application --port 8100` / `daphne` for ASGI. Add `DEBUG=0` however the settings module reads it.
 
 **Run `python manage.py check --deploy` before anything else.** It is Django's own production audit and reports `DEBUG`, `SECRET_KEY` strength, `ALLOWED_HOSTS`, `SECURE_SSL_REDIRECT`, HSTS, cookie flags, and `X_FRAME_OPTIONS` in one command. Run it with the production settings module. It is evidence for SEC-008, SEC-025, SEC-032, SEC-033, SEC-034 at once and its output should be quoted rather than re-derived.
+
+**This build writes into the tree.** `collectstatic` copies every static file into `STATIC_ROOT` — often a `staticfiles/` or `static_root/` directory that did not exist before — and `ManifestStaticFilesStorage` also writes `staticfiles.json` there. Reverse it by deleting the directory, but only if the build created it: check `git status --porcelain` and whether `STATIC_ROOT` is gitignored before removing anything. HYG-015's own run must happen in a throwaway clone rather than in the project directory precisely for this reason — follow that rule there, and say so if you collected static in the project tree for some other check's production-mode server.
 
 Two things other domains ask of this section. Compression (PERF-003) is `django.middleware.gzip.GZipMiddleware`, Whitenoise's own compression for static files, or the proxy in front — none is on by default. Deployment shape (PERF-016): Django normally runs as long-lived gunicorn or uvicorn workers, so there is no cold start to measure and that check is `n/a — long-lived process`; say so rather than leaving it blank, and defer to the platform's stack file if it is deployed scale-to-zero.
 
@@ -84,19 +86,19 @@ def stripe_webhook(request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
-    except (ValueError, stripe.error.SignatureVerificationError):
+    except (ValueError, stripe.SignatureVerificationError):
         return HttpResponseBadRequest("bad signature")
     process_stripe_event.delay(event["id"], event["type"])
     return HttpResponse(status=200)
 ```
-`stripe.Webhook.construct_event` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. For other providers, see that provider's stack file; the raw-body rule is the same.
+`stripe.SignatureVerificationError` is the modern path; older code raises `stripe.error.SignatureVerificationError` from the legacy `stripe.error` module, which still resolves in current releases — match whichever the project's pinned version uses rather than rewriting it. `stripe.Webhook.construct_event` enforces the timestamp tolerance itself (300 seconds by default), which is the replay defence SEC-051 asks about. This is the shape verification takes on this stack, not a file to drop in: the route, the settings accessor, and the dispatch call are the project's own. For other providers, see that provider's stack file; the raw-body rule is the same.
 
 ## data access
 The Django ORM. Models `<app>/models.py`, migrations `<app>/migrations/`, `DATABASES` in settings. There is no single schema file — the migration set *is* the schema, and `python manage.py sqlmigrate <app> <number>` prints the SQL for one.
 
 **Connection pooling** (DAT-008): Django opens a connection per request and closes it unless `CONN_MAX_AGE` is set (persistent connections) or `CONN_HEALTH_CHECKS` is on; with many gunicorn workers and no external pooler that is a connection per worker per request, which is what exhausts Postgres. An external pooler (PgBouncer, RDS Proxy) in the `HOST`/`PORT` changes the answer. **Row-level security** (DAT-001, DAT-002): Django does not use it. The ORM connects as one database user with access to every row and all authorization is application code, so unless a migration contains `enable row level security` by hand, record RLS as not in use and let SEC-011 and DAT-026 carry that ground.
 
-**SQL sinks** (SEC-038): `Model.objects.raw(f"select ... {x}")`, `Model.objects.raw("... %s" % x)`, `.extra(where=[f"..."], select={...})`, `connection.cursor().execute(f"...")`, `RawSQL("... " + x, [])`, `.annotate(v=RawSQL(...))`. Safe forms: `Model.objects.raw("select ... where id = %s", [x])`, `cursor.execute(sql, [x])`, and ordinary queryset filters. Note that `%s` here is the driver's placeholder, not Python string formatting — `execute("... %s" % x)` and `execute("... %s", [x])` look almost identical and one of them is an injection. `.extra()` is deprecated and its `where`/`tables` arguments are not escaped at all.
+**SQL sinks** (SEC-038): `Model.objects.raw(f"select ... {x}")`, `Model.objects.raw("... %s" % x)`, `.extra(where=[f"..."], select={...})`, `connection.cursor().execute(f"...")`, `RawSQL("... " + x, [])`, `.annotate(v=RawSQL(...))`. Safe forms: `Model.objects.raw("select ... where id = %s", [x])`, `cursor.execute(sql, [x])`, and ordinary queryset filters. Note that `%s` here is the driver's placeholder, not Python string formatting — `execute("... %s" % x)` and `execute("... %s", [x])` look almost identical and one of them is an injection. `.extra()` has been documented as slated for deprecation for years without being removed, so it is still live code you will find in real projects — and its `where`/`tables` arguments are not escaped at all.
 
 **Dynamic identifiers** (SEC-040): `order_by(request.GET['sort'])`, `filter(**request.GET.dict())`, `values(*request.GET.getlist('fields'))`. Django validates field names against the model for `order_by` and `filter`, which limits the damage to field enumeration and related-model traversal (`user__password` in a `values()` is a real leak), but a user-controlled `**kwargs` into `filter` can still reach relations the view never intended.
 
