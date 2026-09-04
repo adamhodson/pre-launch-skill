@@ -165,7 +165,7 @@ After the batch print a table: ID, title, result. In mode 2 stop here and wait f
 
 For each guided finding, show ID, title, severity, evidence, recommendation, and a concrete proposal — a diff for code changes, a written plan for config, DNS, or dashboard changes you cannot make yourself. Ask: **yes / edit / skip**.
 
-- **yes** — apply it, then re-verify, commit, and update the finding exactly as steps 3.3 through 3.6 describe.
+- **yes** — apply it, then re-verify, commit, and update the finding exactly as steps 3.3 through 3.6 describe. When the proposal was a plan you cannot carry out yourself, there is nothing to commit: leave `status: fail` and put what the user has to do in `notes`, and say the next `/pre-launch` will confirm it.
 - **edit** — take the user's changes and re-propose. Nothing is applied until they say yes.
 - **skip** — leave `status: fail` and record any reason the user gives in `notes`.
 
