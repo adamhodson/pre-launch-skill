@@ -35,7 +35,9 @@ Handlers are `export default defineEventHandler(async (event) => { ... })`. Read
 
 `routeRules` in `nuxt.config` is a per-path override layer that matters to several checks: it sets `prerender`, `ssr`, `swr`/`isr`/`cache`, `redirect`, `headers`, and `cors` per glob. Read it before trusting what a page component appears to do.
 
-To enumerate routes: `find server/api server/routes -type f` for the API surface, `find pages app/pages -name '*.vue'` for pages, and check `.nuxt/routes.json` or the `nuxt build` output listing after a build.
+The AI/chat endpoint, when there is one, is a server route rather than a page — `server/api/chat.post.ts` is the convention, returning a stream. With the `ai` package it is `streamText(...).toDataStreamResponse()`; hand-rolled versions use h3's `sendStream(event, ...)` or an `EventStream` helper. Either way the response is server-sent events or the `ai` package's data-stream protocol, so a probe must read the whole stream and reassemble the text before judging it — the first chunk is not the answer.
+
+To enumerate routes: `find server/api server/routes -type f` for the API surface, `find pages app/pages -name '*.vue'` for pages, and read the route table `nuxt build` prints. Nuxt also emits a generated route module (`.nuxt/routes.mjs` in current versions — a virtual module, not JSON) and `npx nuxi analyze` produces a build report; check the version's output rather than expecting a particular file.
 
 ## auth
 Nuxt ships no auth. Identify the library first:
@@ -91,7 +93,7 @@ Body size is bounded by Nitro's host, not by Nuxt: on a node server it is effect
 No queue ships with Nuxt. Nitro has scheduled tasks (`server/tasks/**` with `defineTask`, scheduled via `nitro.scheduledTasks` in `nuxt.config`, and runnable with `runTask`), but they have been behind `experimental.tasks` and are preset-dependent — check the installed version's docs before treating a `server/tasks/` directory as a working scheduler, and note that most serverless presets cannot run them at all. In practice look for: a platform cron (`vercel.json` `crons`, a Netlify scheduled function, a Cloudflare cron trigger) hitting a `server/api/cron/*` route; Inngest, Trigger.dev, or QStash; a separate BullMQ worker process in the repo. A cron-triggered route must authenticate the caller — a shared bearer secret checked with `getHeader(event, 'authorization')` (SEC-014). Email sends are usually inline in a handler (`server/utils/email.ts` wrapping Resend, Postmark, SendGrid, or nodemailer), not queued.
 
 ## error handling and logging
-`error.vue` at the app root renders any fatal error, receiving the error as a prop and using `clearError({ redirect })` to recover; `useError()` reads it. Handlers signal errors with `createError({ statusCode, statusMessage, message, data })`. **In production Nitro strips `message`, `data`, and the stack from an error that was not created with `createError`, but a `createError` you wrote is sent to the client as-is — putting a database message or an upstream response into `message` or `data` leaks it (SEC-009).** `nuxt.config` `debug: true` restores verbose errors and must not be on in production.
+`error.vue` at the app root renders any fatal error, receiving the error as a prop and using `clearError({ redirect })` to recover; `useError()` reads it. Handlers signal errors with `createError({ statusCode, statusMessage, message, data })`. **In production Nitro strips the detail from an error it did not expect — the stack, and the message of a plain thrown `Error` — while an error you built with `createError` is sent to the client as you wrote it, so putting a database message or an upstream response into its `message` or `data` leaks it (SEC-009).** The exact scrubbing rules differ across h3 and Nitro versions, so check the version's docs and, better, confirm it empirically: throw a test error from a scratch route in the production build and read what comes back. `nuxt.config` `debug: true` restores verbose errors and must not be on in production.
 
 Reporting: `@sentry/nuxt` (adds `sentry.client.config.ts` and `sentry.server.config.ts` and a Nitro plugin), or manual init in `plugins/sentry.client.ts` plus `server/plugins/sentry.ts`. Both runtimes need initialising — the server half is the one usually missed. App-level Vue errors can also be trapped with `vueApp.config.errorHandler` in a client plugin and the `vue:error` / `app:error` hooks. Nitro's own hooks (`error`, `request`, `afterResponse`) in `server/plugins/*.ts` are the place for request logging; otherwise it is `console.log` to the platform stream.
 
@@ -112,12 +114,12 @@ Three places, in order of how often they are used:
 - `routeRules` with `swr`, `isr`, `cache`, or a `cache-control` header on a path that returns per-user data: one user's response is served to the next (SEC-036).
 - `routeRules` with `prerender: true`, or `nuxt generate`, on a page that reads a session: the first user's data is baked into HTML (SEC-011).
 - `ssr: false` turns the app into a SPA: every guard that appears to run server-side does not, and all data comes from `server/api` routes that must each be protected (SEC-010).
-- A full DB row returned from a server route and hydrated into the `__NUXT__` payload: every column is public (SEC-003).
+- A full DB row returned from a server route and hydrated into the `__NUXT__` payload: every column is public whatever the template renders (SEC-042, and SEC-003 if the row holds a credential).
 - `@nuxt/image` with no `image.domains` allowlist while optimizing remote URLs: SEC-045.
 - `navigateTo(route.query.redirect)` or `sendRedirect(event, getQuery(event).next)` without an allowlist: SEC-029. `navigateTo` with `external: true` on a user-supplied URL is the same bug.
 - `.env` assumed to be read in production: it is not read by `node .output/server/index.mjs` (REL-008).
 - Preview or branch deployments inheriting production env unless scoped per environment: DAT-017.
-- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit.
+- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit. Cited by the accessibility and compliance domain headers, COMP-007, and FLOW-018.
 
 ## runtime probe hints
 **Session cookie for `curl`.** Log in through the app's own route and keep the jar:
@@ -135,6 +137,24 @@ curl -s -b .pre-launch/flows/cookies.txt http://localhost:3100/api/me
 Find the real handler paths from "routes and handlers" first (`find server/api server/routes -path '*auth*'`), since the route names are the project's own. If sign-up is a client-side form posting through a composable, drive it with the project's existing browser driver and say so.
 
 **Cookie names.** nuxt-auth-utils `nuxt-session`; @sidebase/nuxt-auth uses Auth.js names (`authjs.session-token` / `next-auth.session-token`, `__Secure-` prefixed over HTTPS); @nuxtjs/supabase `sb-<project-ref>-auth-token`, sometimes chunked as `.0` / `.1` — send every chunk; hand-rolled sessions use whatever `setCookie(event, <name>, ...)` says, commonly `session` or `sid`. `grep -rn "setCookie(event" server/` finds it.
+
+**JWT for API probes.** A cookie is not always the credential. DAT-002's RLS probe and the AI domain's per-user retrieval checks call the data API directly as the user, which needs `Authorization: Bearer <jwt>` — and that is **Supabase-specific**, because PostgREST is what makes a per-user bearer probe possible. With any other auth library there is no equivalent surface: record `n/a — no PostgREST surface` for the bearer half and rely on the cookie probes above.
+
+On Supabase, two ways to get the token. The `@nuxtjs/supabase` module reads `SUPABASE_URL` and `SUPABASE_KEY`, while a project wiring the client through `runtimeConfig` will have them as `NUXT_PUBLIC_SUPABASE_URL` / `NUXT_PUBLIC_SUPABASE_KEY` — grep for both before assuming a name. Sign in against the auth API and read `access_token` straight out of the response, which is the reliable one:
+```bash
+curl -s -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_KEY" -H 'content-type: application/json' \
+  -d '{"email":"...","password":"..."}' | jq -r .access_token
+```
+Or lift it from the cookie the app already set: `sb-<project-ref>-auth-token` holds a base64-encoded JSON session object, chunked across `.0` / `.1` when it is large, and the JWT is its `access_token` field:
+```bash
+echo "<the chunk values joined in order>" | sed 's/^base64-//' | base64 -d | jq -r .access_token
+```
+Check the cookie's shape in this version before trusting that pipeline — the `base64-` prefix and the chunking were not always there, and older releases stored the JSON directly. Then probe with both headers, since PostgREST wants the `apikey` as well as the bearer:
+```bash
+curl -s "$SUPABASE_URL/rest/v1/<table>?select=*" -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer <jwt>"
+```
+For the other libraries, so you do not waste time looking: an Auth.js session cookie is either an encrypted JWE (the JWT strategy — not readable by you and not a bearer token for anything) or an opaque database session id; Clerk's `__session` is a JWT but is meant to be verified by Clerk's backend SDK, not replayed at a data API; Lucia and hand-rolled sessions are opaque ids. In all of those the cookie is the only credential the audit can use.
 
 **Health path.** No convention. Look for `server/api/health.ts`, `server/api/healthz.ts`, `server/routes/health.ts`, or a `_health` route. If none exists, use the cheapest static page for cold-start timing and say which you used.
 

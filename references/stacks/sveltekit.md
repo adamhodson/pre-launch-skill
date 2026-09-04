@@ -43,6 +43,8 @@ Everything lives under `src/routes/**`, with the directory path becoming the URL
 
 Params are `[id]`, optional `[[lang]]`, rest `[...path]`, matchers `[id=integer]` defined in `src/params/`. Route groups `(app)`, `(marketing)` do not affect the URL and are the usual marker for an authenticated area. Page-level options are module-level exports: `prerender`, `ssr`, `csr`, `trailingSlash`, `config`.
 
+The AI/chat endpoint, when there is one, is a `+server.ts` rather than a page — `src/routes/api/chat/+server.ts` is the convention, returning a stream. With the `ai` package it is `streamText(...).toDataStreamResponse()`; hand-rolled versions return `new Response(readableStream, { headers: { 'content-type': 'text/event-stream' } })`. Either way the response is server-sent events or the `ai` package's data-stream protocol, so a probe must read the whole stream and reassemble the text before judging it — the first chunk is not the answer.
+
 To enumerate routes: `find src/routes -name '+page.svelte' -o -name '+server.ts' -o -name '+page.server.ts'`, and read the route list printed by `npm run build`.
 
 ## auth
@@ -72,7 +74,7 @@ The trap that follows from this: a `+layout.server.ts` guard covers the pages be
 Libraries you will see: `@auth/sveltekit` (Auth.js — `SvelteKitAuth` in `hooks.server.ts`, `event.locals.auth()`, providers array, `AUTH_SECRET`), Lucia (hand-rolled sessions in a `session` table with a `validateSessionToken` helper — Lucia v3 was a library, later versions are a documented pattern, so expect the code in `src/lib/server/auth.ts`), `@supabase/ssr` (`createServerClient` in `hooks.server.ts` with `cookies.getAll`/`setAll`, then `safeGetSession()` calling `getUser()` — never trust `getSession()` alone for authorization), and Clerk's SvelteKit SDK. Cookies are set with `cookies.set(name, value, { path: '/', httpOnly: true, secure: true, sameSite: 'lax' })` — SvelteKit 2 requires an explicit `path`.
 
 ## webhook handlers
-`src/routes/api/webhooks/<provider>/+server.ts` exporting `POST`. The raw body is `await request.text()`; SvelteKit does not parse the body for you, so nothing is consumed before you ask — but calling `await request.json()` first consumes the stream and a later `request.text()` throws, which is how a handler ends up unable to verify (SEC-051). Webhook routes must not sit behind a `handle` hook that redirects unauthenticated requests, and they are legitimately exempt from CSRF: add the path to `kit.csrf` handling or make sure the origin check does not reject a provider POST (webhooks send no `Origin` header, which SvelteKit's check allows, but a custom check may not).
+`src/routes/api/webhooks/<provider>/+server.ts` exporting `POST`. The raw body is `await request.text()`; SvelteKit does not parse the body for you, so nothing is consumed before you ask — but calling `await request.json()` first consumes the stream and a later `request.text()` throws, which is how a handler ends up unable to verify (SEC-051). Webhook routes must not sit behind a `handle` hook that redirects unauthenticated requests. On CSRF, know the actual mechanism: `kit.csrf` is `{ checkOrigin: boolean }` — a single global switch, with no per-path option — and the check applies only to non-GET requests whose content type is one of the form types (`application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain`). A JSON webhook (`application/json`, which Stripe, GitHub, Resend and most providers send) is therefore unaffected and needs nothing done. A provider that posts **form-encoded** (Twilio, Slack's older payloads, some Mailgun configurations) will be **rejected with 403**, because its `Origin` header is absent or is the provider's own. There are two honest workarounds and no third: receive that provider on a JSON endpoint if it offers one, or set `checkOrigin: false` and implement the origin check yourself in `hooks.server.ts` for the routes that need it — which is SEC-030's territory, so record it there rather than treating it as a webhook detail.
 
 ## webhook verification snippet
 ```ts
@@ -155,12 +157,12 @@ CSP specifically has first-class support: `kit.csp` in `svelte.config.js` with `
 - `setHeaders({ 'cache-control': 'public, max-age=...' })` in a load returning per-user data, or a CDN rule doing the same: SEC-036.
 - `redirect(303, url.searchParams.get('redirectTo'))` without an allowlist: SEC-029.
 - No image optimizer ships with SvelteKit, so SEC-045's remote-host allowlist question is usually "not applicable — no image proxy". It becomes applicable if the project added one: a `+server.ts` route that fetches a URL from a query parameter and re-serves it is an open proxy, and an external image CDN moves the allowlist to that CDN's config.
-- `csrf: { checkOrigin: false }` in `svelte.config.js`: disables the built-in cross-origin POST defence for every form action (SEC).
-- A full DB row returned from a load or action: serialized into the page payload and public (SEC-003, DAT).
-- `cookies.set` without `path: '/'`: SvelteKit 2 requires it, and a missing or wrong path silently scopes the session to one route.
-- adapter-node behind a proxy without `ORIGIN` set: form POSTs fail the origin check in production but not locally.
+- `csrf: { checkOrigin: false }` in `svelte.config.js`: disables the built-in cross-origin form-POST defence for every form action, and nothing else replaces it unless the project wrote its own check (SEC-030).
+- A full DB row returned from a load or action: serialized into the page payload, so every column is public whatever the component renders (SEC-042, and SEC-003 if the row holds a credential).
+- `cookies.set` without `path: '/'`: SvelteKit 2 requires an explicit path, and a missing or wrong one silently scopes the session to a single route (SEC-025).
+- adapter-node behind a proxy without `ORIGIN` set: the app derives the wrong origin, so form POSTs fail the origin check in production but not locally, and any URL the app builds for itself points at the wrong host (SEC-022).
 - Preview or branch deployments inheriting production env unless scoped per environment: DAT-017.
-- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit.
+- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit. Cited by the accessibility and compliance domain headers, COMP-007, and FLOW-018.
 
 ## runtime probe hints
 **Session cookie for `curl`.** Log in through the app's own endpoint and keep the jar. Note that SvelteKit form actions are posted as form-encoded to `?/<action>`, not as JSON:
@@ -179,6 +181,24 @@ curl -s -b .pre-launch/flows/cookies.txt http://localhost:3100/dashboard -o /dev
 The `origin` header matters: with `csrf.checkOrigin` on (the default), a cross-origin form POST is rejected with 403, and a probe that forgets the header will read that as a broken sign-up. Find the real action name from `src/routes/**/+page.server.ts` (`export const actions = { ... }`) before writing the URL.
 
 **Cookie names.** No framework default — grep for it: `grep -rn "cookies.set(" src/`. Common values: `session`, `sessionid`, `auth_session` (the Lucia convention), `@auth/sveltekit` uses the Auth.js names `authjs.session-token` / `next-auth.session-token` with a `__Secure-` prefix over HTTPS, `@supabase/ssr` uses `sb-<project-ref>-auth-token` and may chunk it as `.0` / `.1` — send every chunk.
+
+**JWT for API probes.** A cookie is not always the credential. DAT-002's RLS probe and the AI domain's per-user retrieval checks call the data API directly as the user, which needs `Authorization: Bearer <jwt>` — and that is **Supabase-specific**, because PostgREST is what makes a per-user bearer probe possible. With any other auth library there is no equivalent surface: record `n/a — no PostgREST surface` for the bearer half and rely on the cookie probes above.
+
+On Supabase, two ways to get the token. Sign in against the auth API and read `access_token` straight out of the response, which is the reliable one:
+```bash
+curl -s -X POST "$PUBLIC_SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $PUBLIC_SUPABASE_ANON_KEY" -H 'content-type: application/json' \
+  -d '{"email":"...","password":"..."}' | jq -r .access_token
+```
+Or lift it from the cookie the app already set: `sb-<project-ref>-auth-token` holds a base64-encoded JSON session object, chunked across `.0` / `.1` when it is large, and the JWT is its `access_token` field:
+```bash
+echo "<the chunk values joined in order>" | sed 's/^base64-//' | base64 -d | jq -r .access_token
+```
+Check the cookie's shape in this version before trusting that pipeline — the `base64-` prefix and the chunking were not always there, and older releases stored the JSON directly. Then probe with both headers, since PostgREST wants the `apikey` as well as the bearer:
+```bash
+curl -s "$PUBLIC_SUPABASE_URL/rest/v1/<table>?select=*" -H "apikey: $PUBLIC_SUPABASE_ANON_KEY" -H "Authorization: Bearer <jwt>"
+```
+For the other libraries, so you do not waste time looking: an Auth.js session cookie is either an encrypted JWE (the JWT strategy — not readable by you and not a bearer token for anything) or an opaque database session id; Clerk's `__session` is a JWT but is meant to be verified by Clerk's backend SDK, not replayed at a data API; Lucia and hand-rolled sessions are opaque ids. In all of those the cookie is the only credential the audit can use.
 
 **Health path.** No convention. Look for `src/routes/health/+server.ts`, `src/routes/healthz/+server.ts`, or `src/routes/api/health/+server.ts`. If none exists, use the cheapest static page for cold-start timing and say which you used.
 

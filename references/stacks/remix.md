@@ -151,13 +151,13 @@ Three places:
 - A `headers` export returning `Cache-Control: public, max-age=...` on a route whose loader returns per-user data, or a CDN rule doing the same: SEC-036.
 - `redirect(new URL(request.url).searchParams.get('redirectTo'))` without an allowlist: SEC-029. The `redirectTo` pattern is idiomatic in Remix's own templates, which is exactly why it is usually unvalidated.
 - No image optimizer ships with Remix, so SEC-045's remote-host allowlist question is usually "not applicable — no image proxy". It becomes applicable if the project added one: a resource route that fetches a URL from a query parameter and re-serves or resizes it is an open proxy, and an external image CDN moves the allowlist to that CDN's config.
-- `createCookieSessionStorage` used to store more than an id: the cookie is signed, not encrypted, and its contents are readable with base64 (SEC).
+- `createCookieSessionStorage` used to store more than an id: the cookie is signed, not encrypted, so its contents are readable with `base64 -d` (SEC-042 for what is in it), and because the session lives entirely in the cookie there is no server-side record to revoke, which makes logout cosmetic (SEC-026).
 - `secrets: ['default']` or a hardcoded `SESSION_SECRET` fallback: session forgery (SEC-001).
 - `secure: process.env.NODE_ENV === 'production'` with `NODE_ENV` unset in production: the session cookie ships without `Secure` (SEC-025).
-- `entry.server.tsx` absent, so `handleError` is never defined and server errors are unreported (REL).
+- `entry.server.tsx` absent, so `handleError` is never defined and server errors are unreported even though the browser half of Sentry works: the server tier of error reporting is simply missing (REL-001), and `ErrorBoundary` rendering `error.stack` is the matching leak (SEC-009).
 - React Router 7 `prerender` or SPA mode on a route that reads a session: one user's data baked into HTML (SEC-011).
 - Preview or branch deployments inheriting production env unless scoped per environment: DAT-017.
-- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit.
+- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit. Cited by the accessibility and compliance domain headers, COMP-007, and FLOW-018.
 
 ## runtime probe hints
 **Session cookie for `curl`.** Remix actions take form-encoded posts by default (`<Form method="post">`), so post to the route's own path:
@@ -175,6 +175,24 @@ curl -s -b .pre-launch/flows/cookies.txt http://localhost:3100/dashboard -o /dev
 A successful login normally answers `302` with `Set-Cookie`, so use `-i` and follow with `-L -b` only after you have the cookie. The route paths are the project's own — find them from `app/routes/` (`login`, `join`, `signup`, `auth.login`) or `app/routes.ts` before writing the URL. If the project ships a JSON API route instead, post JSON to that.
 
 **Cookie names.** Whatever `createCookieSessionStorage({ cookie: { name } })` says — `grep -rn "createCookie" app/`. The Remix templates default to `__session`, and `_session` and `__remix_session` are common. `remix-auth` reuses the app's own session storage, so the same name. `@supabase/ssr` uses `sb-<project-ref>-auth-token`, possibly chunked as `.0` / `.1` — send every chunk. Clerk uses `__session` plus `__client_uat`.
+
+**JWT for API probes.** A cookie is not always the credential. DAT-002's RLS probe and the AI domain's per-user retrieval checks call the data API directly as the user, which needs `Authorization: Bearer <jwt>` — and that is **Supabase-specific**, because PostgREST is what makes a per-user bearer probe possible. With any other auth library there is no equivalent surface: record `n/a — no PostgREST surface` for the bearer half and rely on the cookie probes above.
+
+On Supabase, two ways to get the token. Sign in against the auth API and read `access_token` straight out of the response, which is the reliable one:
+```bash
+curl -s -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_ANON_KEY" -H 'content-type: application/json' \
+  -d '{"email":"...","password":"..."}' | jq -r .access_token
+```
+Or lift it from the cookie the app already set: `sb-<project-ref>-auth-token` holds a base64-encoded JSON session object, chunked across `.0` / `.1` when it is large, and the JWT is its `access_token` field:
+```bash
+echo "<the chunk values joined in order>" | sed 's/^base64-//' | base64 -d | jq -r .access_token
+```
+Check the cookie's shape in this version before trusting that pipeline — the `base64-` prefix and the chunking were not always there, and older releases stored the JSON directly. Then probe with both headers, since PostgREST wants the `apikey` as well as the bearer:
+```bash
+curl -s "$SUPABASE_URL/rest/v1/<table>?select=*" -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer <jwt>"
+```
+For the other libraries, so you do not waste time looking: an Auth.js session cookie is either an encrypted JWE (the JWT strategy — not readable by you and not a bearer token for anything) or an opaque database session id; Clerk's `__session` is a JWT but is meant to be verified by Clerk's backend SDK, not replayed at a data API; Lucia and hand-rolled sessions are opaque ids. In all of those the cookie is the only credential the audit can use.
 
 **Health path.** No convention. Look for `app/routes/healthcheck.tsx` — the Remix Indie/Blues stacks ship exactly that name, so it is more likely here than on other stacks — plus `health`, `healthz`, `api.health`. If none exists, use the cheapest static route for cold-start timing and say which you used.
 

@@ -40,6 +40,8 @@ Vite loads `.env`, `.env.production`, `.env.development`, and their `.local` var
 - **Server islands** — `server:defer` on a component (Astro 5) fetches that fragment from the server after the shell renders; the fragment endpoint is public and its props are encrypted-but-round-tripped, so it needs the same auth check as any other handler.
 - Special pages: `src/pages/404.astro` (built to `dist/404.html` in a static build, rendered on demand in SSR) and `src/pages/500.astro` (SSR only).
 
+The AI/chat endpoint, when there is one, is an endpoint rather than a page — `src/pages/api/chat.ts` with `export const prerender = false` is the convention, returning a stream. With the `ai` package it is `streamText(...).toDataStreamResponse()`; hand-rolled versions return `new Response(readableStream, { headers: { 'content-type': 'text/event-stream' } })`. Either way the response is server-sent events or the `ai` package's data-stream protocol, so a probe must read the whole stream and reassemble the text before judging it — the first chunk is not the answer. On a static build there is no such endpoint: a chat UI on a static Astro site is calling a third-party API from the browser, which is a different finding (a key in the client bundle) rather than a route to probe.
+
 To enumerate routes: `find src/pages -type f`, then `grep -rn 'export const prerender' src/pages src/` to see which are on-demand.
 
 ## auth
@@ -153,9 +155,10 @@ Middleware is the one place to wrap every on-demand request in a `try`/`catch` a
 - `Cache-Control: public, max-age=...` set in middleware or at the CDN on an on-demand authenticated response: SEC-036.
 - `Astro.redirect(Astro.url.searchParams.get('redirect'))` without an allowlist: SEC-029.
 - `image.domains` or `image.remotePatterns` broad enough to fetch arbitrary hosts (`{ protocol: 'https' }` with no hostname): the optimizer becomes a proxy (SEC-045).
-- A DB client imported by a component that also carries a `client:*` directive: no build error, and the module ships to the browser (SEC-003).
+- A DB client imported by a component that also carries a `client:*` directive: no build error, and the module and its credentials ship to the browser (SEC-003).
+- A full DB row passed as a prop to a hydrated island: it is serialized into the HTML for hydration, so every column is public whatever the component renders (SEC-042).
 - Preview or branch deployments inheriting production env unless scoped per environment: DAT-017.
-- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit.
+- Browser drivers, when a check needs one: only use `playwright`, `puppeteer`, `@playwright/test`, `cypress`, or `selenium` if already in devDependencies; never install one for the audit. Cited by the accessibility and compliance domain headers, COMP-007, and FLOW-018.
 
 ## runtime probe hints
 **First decide whether there is anything to probe.** With no adapter the built site is static files: there is no login endpoint, no session, and no server route. Record that once, mark the runtime halves of auth, flows, and payments checks `skipped — statically generated, no adapter`, and do the static entries. Everything below assumes an adapter is present.
@@ -175,6 +178,24 @@ curl -s -b .pre-launch/flows/cookies.txt http://localhost:3100/dashboard -o /dev
 Find the real handler from `src/pages/api/` or `src/actions/` first. An Astro action is called as `POST /_actions/<name>` with a JSON body, so a project using actions is probed that way rather than through a page route.
 
 **Cookie names.** Whatever `Astro.cookies.set(<name>, ...)` or `context.cookies.set(...)` says — `grep -rn "cookies.set(" src/`. Common values: `session`, `sid`, `auth_session`; `auth-astro`/`@auth/astro` uses the Auth.js names `authjs.session-token` / `next-auth.session-token` (`__Secure-` prefixed over HTTPS); `@clerk/astro` uses `__session` plus `__client_uat`; `@supabase/ssr` uses `sb-<project-ref>-auth-token`, possibly chunked as `.0` / `.1` — send every chunk.
+
+**JWT for API probes.** A cookie is not always the credential. DAT-002's RLS probe and the AI domain's per-user retrieval checks call the data API directly as the user, which needs `Authorization: Bearer <jwt>` — and that is **Supabase-specific**, because PostgREST is what makes a per-user bearer probe possible. With any other auth library there is no equivalent surface: record `n/a — no PostgREST surface` for the bearer half and rely on the cookie probes above.
+
+On Supabase, two ways to get the token. Sign in against the auth API and read `access_token` straight out of the response, which is the reliable one:
+```bash
+curl -s -X POST "$PUBLIC_SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $PUBLIC_SUPABASE_ANON_KEY" -H 'content-type: application/json' \
+  -d '{"email":"...","password":"..."}' | jq -r .access_token
+```
+Or lift it from the cookie the app already set: `sb-<project-ref>-auth-token` holds a base64-encoded JSON session object, chunked across `.0` / `.1` when it is large, and the JWT is its `access_token` field:
+```bash
+echo "<the chunk values joined in order>" | sed 's/^base64-//' | base64 -d | jq -r .access_token
+```
+Check the cookie's shape in this version before trusting that pipeline — the `base64-` prefix and the chunking were not always there, and older releases stored the JSON directly. Then probe with both headers, since PostgREST wants the `apikey` as well as the bearer:
+```bash
+curl -s "$PUBLIC_SUPABASE_URL/rest/v1/<table>?select=*" -H "apikey: $PUBLIC_SUPABASE_ANON_KEY" -H "Authorization: Bearer <jwt>"
+```
+For the other libraries, so you do not waste time looking: an Auth.js session cookie is either an encrypted JWE (the JWT strategy — not readable by you and not a bearer token for anything) or an opaque database session id; Clerk's `__session` is a JWT but is meant to be verified by Clerk's backend SDK, not replayed at a data API; Lucia and hand-rolled sessions are opaque ids. In all of those the cookie is the only credential the audit can use.
 
 **Health path.** No convention. Look for `src/pages/health.ts`, `src/pages/healthz.ts`, `src/pages/api/health.ts`. A static site has no meaningful health endpoint and no cold start; say so rather than substituting a page.
 
