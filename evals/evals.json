@@ -97,11 +97,11 @@
       ],
       "assertions": [
         "Only the compliance domain ran: the latest run entry's domains is [\"compliance\"]",
-        "The six pre-existing findings in other domains are carried forward with their status and last_checked unchanged",
+        "The five pre-existing findings outside the compliance domain are carried forward with their status and last_checked unchanged",
         "COMP-001 (privacy policy) is still fail and new compliance findings are present (e.g. terms page missing)",
         "report.md's latest-run line shows Domains: compliance",
         "git status is clean outside .pre-launch/",
-        "Compliance findings carry last_checked equal to the new run's timestamp while all six prior findings keep last_checked 2026-09-03T12:00:00Z",
+        "Compliance findings (including the pre-existing COMP-001) carry last_checked equal to the new run's timestamp, while the five prior non-compliance findings keep last_checked 2026-09-03T12:00:00Z",
         "At least 30 compliance check IDs (COMP-001..036) appear in findings.json with a status"
       ]
     }
