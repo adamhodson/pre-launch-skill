@@ -60,13 +60,13 @@
         "Report flags GET /orders/:id returning any order without an ownership check as a failing finding",
         "Report flags $queryRawUnsafe with string interpolation as a SQL injection finding",
         "Report flags cors() with default (wildcard) origin as a failing finding",
-        "SEO and accessibility checks are marked skipped/not applicable/error with a reason, not reported as failures of the API",
+        "SEO and accessibility checks are marked skipped/not applicable/error with a reason, not reported as failures of the API \u2014 except that a `fail` backed by static, code-cited behavioral evidence (e.g. a missing-resource route returning 200 instead of 404) is acceptable",
         "Runtime flow checks that could not be exercised are recorded with verified_by static or static-fallback (or status error), and none claims a runtime pass",
         "The run completes and writes findings.json and report.md (no crash)",
         "git status is clean outside .pre-launch/",
         "At least 150 distinct check IDs are recorded in findings.json with a verified_by tier each",
-        "SEO-004/SEO-009-style page checks are recorded as error or skipped with a reason rather than pass, since no server ran",
-        "Measurement checks (PERF-001/011/015/016/018) are status error, not pass"
+        "Page-rendering checks (SEO-004 and similar) are recorded as error or skipped with a reason, never as a `pass` claimed from a live page, since no server ran; a static `fail` with code-cited evidence is acceptable",
+        "Measurement checks (PERF-001/011/015/018) are status error, not pass; PERF-016 may pass only via its documented not-applicable branch (no serverless deployment), never from a claimed measurement"
       ]
     },
     {
