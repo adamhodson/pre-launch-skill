@@ -92,3 +92,21 @@ def test_root_seo_keys_present_on_non_200():
         assert key in root
     assert root["og"] == {} and root["links"] == [] and root["h1_count"] == 0
     srv.shutdown()
+
+
+VALUELESS_HTML = b"""<!doctype html><html><head><title>T</title>
+<link rel><meta property><meta name></head><body></body></html>"""
+
+class HValueless(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
+        self.wfile.write(VALUELESS_HTML)
+    def log_message(self, *a): pass
+
+
+def test_valueless_attrs_do_not_crash_parser():
+    srv, base = serve(HValueless)
+    out = probe(base)
+    root = out["pages"]["/"]
+    assert root["canonical"] is None and root["og"] == {}
+    srv.shutdown()

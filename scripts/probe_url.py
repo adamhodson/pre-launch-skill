@@ -19,11 +19,11 @@ class Page(HTMLParser):
         if tag == "html" and a.get("lang"): self.lang = a["lang"]
         elif tag == "title": self._in_title = True; self._buf = ""
         elif tag == "meta":
-            name, prop, content = a.get("name", ""), a.get("property", ""), a.get("content", "")
+            name, prop, content = a.get("name") or "", a.get("property") or "", a.get("content") or ""
             if name == "description": self.description = content
             if prop.startswith("og:"): self.og[prop] = content
             if name.startswith("twitter:"): self.twitter[name] = content
-        elif tag == "link" and "canonical" in a.get("rel", "").split(): self.canonical = a.get("href")
+        elif tag == "link" and "canonical" in (a.get("rel") or "").split(): self.canonical = a.get("href")
         elif tag == "script" and a.get("type") == "application/ld+json": self._in_ld = True; self._buf = ""
         elif tag == "h1": self.h1_count += 1
         elif tag == "a" and a.get("href"): self.links.append(a["href"])
