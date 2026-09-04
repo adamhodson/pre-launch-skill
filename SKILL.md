@@ -69,7 +69,7 @@ Read `SKILL_DIR/agents/domain-auditor.md` once before stage 1 and fill it per **
 
 When stage 1 did **not** run — `test_account.strategy: none`, or `local` not live — stage 2's dispatch names FLOW-001 and FLOW-016 explicitly as well: "also run FLOW-001 and FLOW-016 from their `static` entries; there is no test account, so record what the code shows and `error` anything needing a live signup." Otherwise the two checks stage 1 owns vanish from the run without ever being reported.
 
-**Stage 3 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish.
+**Stage 3 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish. If the harness caps concurrent subagents (a dispatch is refused or queued), send the domains in batches of up to five, starting the next batch as slots free; the order within stage 3 does not matter.
 
 **Stage 4 — performance.** Only if `performance` is in scope. Dispatch it alone. It generates load and measures a production build, so nothing may run beside it.
 
@@ -99,7 +99,13 @@ Each subagent's final line is a per-domain count. Collect them.
 
 ### 7. Merge
 
-Run:
+A subagent under a time budget can drop a check without noticing — a run once returned 19 of 20 flow IDs — so gate the merge on coverage first:
+
+    python3 SKILL_DIR/scripts/check_coverage.py --dir PROJECT_DIR/.pre-launch --domains <comma-separated domains that ran>
+
+It prints `complete` or `missing <IDs>` per domain and exits 1 on any gap. For each domain with gaps, dispatch that domain once more with "run only <IDs>; write `.pre-launch/findings/<domain>-2.json`", then re-run the gate. A check the config skips or a `when` clause rules out still counts as covered, because the template records it as `skipped`; only an ID that appears nowhere is a gap. Merge only when every domain is complete.
+
+Then run:
 
     python3 SKILL_DIR/scripts/merge_findings.py --dir PROJECT_DIR/.pre-launch --domains <comma-separated domains that ran> --tiers <comma-separated live tiers>
 
