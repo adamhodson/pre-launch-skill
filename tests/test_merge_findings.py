@@ -50,6 +50,16 @@ def test_render_has_summary_and_delta():
     assert md.index("## Security") < md.index("## SEO")
     assert "Since last run:" in md
 
+def test_list_evidence_is_coerced():
+    doc = merge(None, [f("SEC-001", "fail", evidence=["a.ts:1 — no header", "b.ts:2 — same"],
+                         recommendation=["do x"], notes=None)],
+                set(), RUN, "2026-09-04T10:00:00Z")
+    x = doc["findings"][0]
+    assert x["evidence"] == "a.ts:1 — no header\nb.ts:2 — same"
+    assert x["recommendation"] == "do x"
+    md = render(doc)                                  # used to crash on .splitlines()
+    assert "- **SEC-001** T SEC-001 — critical — guided — a.ts:1 — no header" in md
+
 def test_ticks_apply_to_carried_forward_findings():
     prev = {"version": 1, "project": "p", "runs": [], "findings": [
         f("SEC-024", "attest")]}

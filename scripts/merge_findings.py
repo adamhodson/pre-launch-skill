@@ -15,12 +15,34 @@ def read_ticks(report_md):
     return set(TICK_RE.findall(report_md or ""))
 
 
+def text(v):
+    """One string, whatever the auditor emitted (lists get joined with newlines)."""
+    if isinstance(v, (list, tuple)):
+        return "\n".join(str(x) for x in v)
+    return v if isinstance(v, str) else ("" if v is None else str(v))
+
+
+def coerce(f):
+    """Auditors sometimes emit evidence as a list; report rendering wants one string."""
+    f = dict(f)
+    for k in ("evidence", "recommendation", "notes"):
+        v = f.get(k)
+        if v is None and k == "notes":
+            continue
+        f[k] = text(v)
+    for k in ("id", "title", "domain", "severity", "status", "fix", "verified_by"):
+        v = f.get(k)
+        if v is not None and not isinstance(v, str):
+            f[k] = str(v)
+    return f
+
+
 def merge(previous, domain_findings, ticked_ids, run, now, record_run=True):
     prev = {x["id"]: x for x in (previous or {}).get("findings", [])}
     out = dict(prev)
     delta = {"resolved": 0, "new": 0, "regressed": 0}
     for f in domain_findings:
-        f = dict(f)
+        f = coerce(f)
         if f["id"] in ticked_ids and f["status"] == "attest":
             f["status"], f["verified_by"] = "pass", "attested"
         old = prev.get(f["id"])
@@ -73,14 +95,14 @@ def render(doc):
         L += ["", f"## {DOMAIN_TITLE.get(dom, dom.capitalize())}"]
         op = [x for x in xs if x["status"] == "fail"]
         if op:
-            L += ["### Open"] + [f"- **{x['id']}** {x['title']} — {x['severity']} — {x['fix']} — {(x['evidence'] or '').splitlines()[0] if x['evidence'] else ''}" for x in op]
+            L += ["### Open"] + [f"- **{x['id']}** {x['title']} — {x['severity']} — {x['fix']} — {(text(x.get('evidence')).splitlines() or [''])[0]}" for x in op]
         at = [x for x in xs if x["status"] == "attest"]
         if at:
-            L += ["### Attestation"] + [f"- [ ] {x['id']} {x['title']} — evidence: {x['evidence'] or 'none found'}" for x in at]
+            L += ["### Attestation"] + [f"- [ ] {x['id']} {x['title']} — evidence: {text(x.get('evidence')) or 'none found'}" for x in at]
         ps = [x["id"] for x in xs if x["status"] == "pass"]
         if ps: L += ["### Passed", ", ".join(ps)]
         se = [x for x in xs if x["status"] in ("skipped", "error")]
-        if se: L += ["### Skipped / Error"] + [f"- {x['id']} {x['title']} — {x['status']}: {x['notes'] or ''}" for x in se]
+        if se: L += ["### Skipped / Error"] + [f"- {x['id']} {x['title']} — {x['status']}: {text(x.get('notes'))}" for x in se]
     return "\n".join(L) + "\n"
 
 

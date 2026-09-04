@@ -25,7 +25,9 @@ Domain names: `security data performance reliability seo accessibility complianc
 
 ### 1. Config
 
-If `PROJECT_DIR/.pre-launch/config.yml` exists, read it. Otherwise read `SKILL_DIR/references/config-format.md`, run its detection heuristics against the project, fill the schema, and show the result to the user with one question: "Here is what I detected. Correct anything wrong, or say go." Specifically call out the undetectable flags (`health_data`, `minors_possible`, `b2b`) and the local start command. Write the file, create `.pre-launch/` and add it to `.gitignore` if not present.
+If `PROJECT_DIR/.pre-launch/config.yml` exists, read it. Otherwise read `SKILL_DIR/references/config-format.md`, run its detection heuristics against the project, fill the schema, and show the result to the user with one question: "Here is what I detected. Correct anything wrong, or say go." Specifically call out the undetectable flags (`health_data`, `minors_possible`, `b2b`) and the local start command. Write the file.
+
+Then, on every invocation of either phase and whether or not the config was just created: ensure `.pre-launch/` exists and that `.gitignore` contains a `.pre-launch/` line, creating `.gitignore` if the project has none. A config that already existed is exactly the case where the ignore line goes missing and the audit's own output shows up as untracked changes.
 
 ### 2. Applicable domains
 
@@ -34,7 +36,7 @@ Start from the requested domains (all if none named). Drop `mobile` unless `plat
 ### 3. Tiers
 
 - `static`: always live.
-- `local`: send `GET local.url + ready_path`. If it responds, live. Otherwise, if `local.start` is set, run it in the background and poll every 5 s until `ready_timeout_s`; live on 200. If it never responds, say so and continue with local not live.
+- `local`: send `GET local.url + ready_path`. If it responds, do not treat local as live yet — first confirm the server answering that port belongs to **this** project. Run `lsof -nP -iTCP:<port> -sTCP:LISTEN` to get the listening PID and compare its working directory (`lsof -p <pid> | grep cwd`) against PROJECT_DIR; where that is inconclusive, fetch `/` and match its title or markup against this project's own pages. If it is another project's dev server, local is **not** live: say which process holds the port, never probe it, and do not start a second server on it. Otherwise local is live. If nothing responds and `local.start` is set, run it in the background and poll every 5 s until `ready_timeout_s`; live on 200, and the same ownership check applies. If it never responds, say so and continue with local not live.
 - `remote`: if `remote.url` is set, one `HEAD` request; live on any HTTP response.
 
 Record the live tiers. Load testing (performance domain) only ever targets `local.url`.
@@ -64,6 +66,8 @@ Read `SKILL_DIR/agents/domain-auditor.md` once before stage 1 and fill it per **
 **Stage 1 — test account.** If `test_account.strategy` is `create` or `provided` and `local` is live, dispatch the flows subagent alone and tell it: "run only FLOW-001 and the empty-state half of FLOW-016; write `.pre-launch/findings/flows-1.json`; do not write `findings/flows.json`". FLOW-001 handles both strategies — it signs up under `create` and verifies a login under `provided` — and writes `PROJECT_DIR/.pre-launch/test-account.json`, which every account-dependent check reads. Run this stage even when `flows` is not in the requested scope. If `strategy` is `none`, or if `local` is not live, skip the stage: there is no account, and every account-dependent check records `error: no test account`.
 
 **Stage 2 — the rest of flows.** Only if `flows` is in scope. Dispatch flows again: "run FLOW-002 through FLOW-021 except FLOW-009 and the parts already done in stage 1; write `.pre-launch/findings/flows.json`". This is the file every consuming check reads, which is why this stage owns the name and runs before the domains that cite flow evidence.
+
+When stage 1 did **not** run — `test_account.strategy: none`, or `local` not live — stage 2's dispatch names FLOW-001 and FLOW-016 explicitly as well: "also run FLOW-001 and FLOW-016 from their `static` entries; there is no test account, so record what the code shows and `error` anything needing a live signup." Otherwise the two checks stage 1 owns vanish from the run without ever being reported.
 
 **Stage 3 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish.
 
@@ -105,7 +109,7 @@ Run:
 
 Read `PROJECT_DIR/.pre-launch/findings.json` for the numbers below — `report.md` is the artifact you point the user at, not the source you count from. Print:
 
-- the delta line (resolved / new / regressed / open), as the merger printed it;
+- the delta line (resolved / new / regressed / open), as the merger printed it. When the previous run's `domains` list in `runs` is shorter than this run's, the "new" count is mostly scope growth rather than regression, so print directly after it: "N new includes checks run for the first time; compare like-for-like domains for regressions.";
 - the blocker count as the report's `Blockers (critical, open)` line gives it (critical `fail` findings), plus, separately, the count of critical-severity `attest` findings — gaps a human must confirm rather than defects (SEC-060, ACC-001, ACC-011, HYG-001, PAY-001 are examples);
 - the top five open findings by severity;
 - any configured stack that had no reference file;
@@ -129,7 +133,7 @@ If the skill started the dev server, stop it. If the skill created the test acco
 
 ### 1. Load
 
-Read `PROJECT_DIR/.pre-launch/findings.json`. If it is missing, stop: "No findings yet. Run `/pre-launch` first." Compare the newest commit in the project against the `at` of the newest run in `runs` whose `domains` is not `["none"]` — that is the last real audit; the fix phase's own merger calls stamp runs with `domains: none` and would otherwise look like a fresh audit. If the commit is later, say the findings may be stale and continue.
+Read `PROJECT_DIR/.pre-launch/findings.json`. If it is missing, stop: "No findings yet. Run `/pre-launch` first." Apply the `.gitignore` rule from audit step 1 here too, before any commit. Compare the newest commit in the project against the `at` of the newest run in `runs` whose `domains` is not `["none"]` — that is the last real audit; the fix phase's own merger calls stamp runs with `domains: none` and would otherwise look like a fresh audit. If the commit is later, say the findings may be stale and continue.
 
 Then apply any attestation boxes the user ticked in `report.md`:
 
@@ -161,7 +165,11 @@ For each easy finding:
 5. **Verify fails:** revert the fix before moving on — `git checkout -- <the files you touched>` and delete any file you created — then set `status: error` and `notes: "fix attempted; re-verify failed: <reason>"` and continue. Never carry a half-applied fix into the next finding.
 6. **Tier cannot be brought up** (the server will not start, the production build fails, `remote.url` is unreachable): an unverified fix is never committed. Revert exactly as in step 5 — `git checkout -- <the files you touched>`, delete any file you created — and leave `status: fail`, `resolved: null`, no `commit`, and `notes: "fix deferred; re-verify needs <tier> — bring it up and re-run /pre-launch fix"`.
 
-After the batch print a table: ID, title, result. In mode 2 stop here and wait for the user to say continue.
+After the batch print a table: ID, title, result. In mode 2, first re-run the merger so the artifact the user is about to review matches what just happened —
+
+    python3 SKILL_DIR/scripts/merge_findings.py --dir PROJECT_DIR/.pre-launch --domains none --tiers none
+
+— then stop and wait for the user to say continue. (Ignore the delta line it prints, for the reason step 5 gives.)
 
 ### 4. Guided loop
 
