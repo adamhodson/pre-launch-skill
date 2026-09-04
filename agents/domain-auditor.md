@@ -15,7 +15,7 @@ You are auditing the project at `{{project_dir}}` for the **{{domain}}** domain 
 
 ## Procedure
 
-Work through every check in file order. For each:
+Work through every check in file order unless the check file's header states a different order (flows, performance, and seo do); follow the header. For each:
 
 1. **Applicability.** If the check has a `when:` clause and the config evaluates it false, or the ID is in `skip`, write `status: skipped` with the reason in `notes`. Never drop a check silently.
 2. **Pick the tier.** Use the highest tier in the check's `verify` block that is also in the live tiers. If none is live and the check has a `static` verify, use static. If nothing can run, `status: error`, `notes: "tier <x> unavailable"`.
