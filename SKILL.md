@@ -57,21 +57,23 @@ Skip anything listed in `tools.declined`. Ask once: "These tools are missing: X,
 
 ### 5. Dispatch order
 
-Run the five stages below in order. The order exists because the shared test account must survive until performance has run, flows must not run after a load has throttled the app, and FLOW-009 destroys the account.
+Run the five stages below in order. The order exists because the shared test account must survive until performance has run, the non-destructive flow evidence must exist before the domains that reuse it, and FLOW-009 destroys the account, so it is last.
 
 Read `SKILL_DIR/agents/domain-auditor.md` once before stage 1 and fill it per **Filling the template** below for every dispatch.
 
 **Stage 1 — test account.** If `test_account.strategy` is `create` or `provided` and `local` is live, dispatch the flows subagent alone and tell it: "run only FLOW-001 and the empty-state half of FLOW-016; write `.pre-launch/findings/flows-1.json`; do not write `findings/flows.json`". FLOW-001 handles both strategies — it signs up under `create` and verifies a login under `provided` — and writes `PROJECT_DIR/.pre-launch/test-account.json`, which every account-dependent check reads. Run this stage even when `flows` is not in the requested scope. If `strategy` is `none`, or if `local` is not live, skip the stage: there is no account, and every account-dependent check records `error: no test account`.
 
-**Stage 2 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish.
+**Stage 2 — the rest of flows.** Only if `flows` is in scope. Dispatch flows again: "run FLOW-002 through FLOW-021 except FLOW-009 and the parts already done in stage 1; write `.pre-launch/findings/flows.json`". This is the file every consuming check reads, which is why this stage owns the name and runs before the domains that cite flow evidence.
 
-**Stage 3 — the rest of flows.** Only if `flows` is in scope. Dispatch flows again: "run FLOW-002 through FLOW-021 except FLOW-009 and the parts already done in stage 1; write `.pre-launch/findings/flows-2.json`; do not write `findings/flows.json`".
+**Stage 3 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish.
 
 **Stage 4 — performance.** Only if `performance` is in scope. Dispatch it alone. It generates load and measures a production build, so nothing may run beside it.
 
 **Stage 5 — account teardown.** Only if `flows` is in scope. Dispatch flows a third time: "run only FLOW-009; write `.pre-launch/findings/flows-3.json`; do not write `findings/flows.json`". FLOW-009 deletes the shared account, which is why it is last.
 
-`merge_findings.py` globs `findings/*.json`, so the three flows files merge by check ID like any other domain file; later file wins on the same ID, so stage 3's fuller FLOW-016 verdict supersedes stage 1's.
+FLOW-009's evidence cannot exist during the same full run for DAT-020, COMP-010, AI-011, MOB-005; those checks read FLOW-009 from a previous run's `findings.json` when present and otherwise take their disposable-account branch.
+
+`merge_findings.py` globs `findings/*.json` in sorted order, so the three flows files merge by check ID like any other domain file and the later file wins on the same ID. `flows-1.json` < `flows-3.json` < `flows.json`, so stage 2's fuller FLOW-016 verdict still supersedes stage 1's.
 
 ### 6. Filling the template
 
@@ -87,7 +89,7 @@ Substitute into `SKILL_DIR/agents/domain-auditor.md`:
 - `{{budget_minutes}}`: `budget_minutes_per_domain` from config, default 20.
 - `{{skill_dir}}`: `SKILL_DIR`. `{{project_dir}}`: `PROJECT_DIR`.
 
-Add these two lines to every dispatch: "a check file's header may override file order (flows and performance do); follow the header. If this dispatch names an output filename, it replaces the template's `findings/{{domain}}.json` — write only to the named file."
+Add these two lines to every dispatch: "a check file's header may override file order (flows, performance, and seo do); follow the header. If this dispatch names an output filename, it replaces the template's `findings/{{domain}}.json` — write only to the named file."
 
 Each subagent's final line is a per-domain count. Collect them.
 
