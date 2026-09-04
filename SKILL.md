@@ -29,7 +29,7 @@ If `PROJECT_DIR/.pre-launch/config.yml` exists, read it. Otherwise read `SKILL_D
 
 ### 2. Applicable domains
 
-Start from the requested domains (all if none named). Drop `mobile` unless `platforms` includes `ios` or `android`; drop `payments` unless `features.payments`; drop `ai` unless `features.ai`. Tell the user which domains will run and which were dropped and why.
+Start from the requested domains (all if none named). Drop `mobile` unless `platforms` includes `ios` or `android`; drop `payments` unless `features.payments`; drop `ai` unless `features.ai`. Tell the user which domains will run and which were dropped and why; note that flows may also run once to create the test account even when not in scope.
 
 ### 3. Tiers
 
@@ -61,17 +61,17 @@ Run the five stages below in order. The order exists because the shared test acc
 
 Read `SKILL_DIR/agents/domain-auditor.md` once before stage 1 and fill it per **Filling the template** below for every dispatch.
 
-**Stage 1 — test account.** If `test_account.strategy` is `create` and `local` is live, dispatch the flows subagent alone and tell it: "run only FLOW-001 and the empty-state half of FLOW-016; write `.pre-launch/findings/flows-1.json`". It writes `PROJECT_DIR/.pre-launch/test-account.json`, which every account-dependent check reads. Run this stage even when `flows` is not in the requested scope. If `strategy` is `provided`, write `test-account.json` yourself from the config values (`{"email": ..., "password_env": <credentials_env>, "user_id": null, "created_at": <now>, "cookie": null}`) and skip this dispatch. If `strategy` is `none`, or if it is `create` but `local` is not live, skip the stage: there is no account, and every account-dependent check records `error: no test account`.
+**Stage 1 — test account.** If `test_account.strategy` is `create` or `provided` and `local` is live, dispatch the flows subagent alone and tell it: "run only FLOW-001 and the empty-state half of FLOW-016; write `.pre-launch/findings/flows-1.json`; do not write `findings/flows.json`". FLOW-001 handles both strategies — it signs up under `create` and verifies a login under `provided` — and writes `PROJECT_DIR/.pre-launch/test-account.json`, which every account-dependent check reads. Run this stage even when `flows` is not in the requested scope. If `strategy` is `none`, or if `local` is not live, skip the stage: there is no account, and every account-dependent check records `error: no test account`.
 
 **Stage 2 — everything else, in parallel.** Dispatch every applicable domain except `flows` and `performance`, all in the same turn. Each writes `PROJECT_DIR/.pre-launch/findings/<domain>.json`. Wait for all to finish.
 
-**Stage 3 — the rest of flows.** Only if `flows` is in scope. Dispatch flows again: "run FLOW-002 through FLOW-021 except FLOW-009 and the parts already done in stage 1; write `.pre-launch/findings/flows-2.json`".
+**Stage 3 — the rest of flows.** Only if `flows` is in scope. Dispatch flows again: "run FLOW-002 through FLOW-021 except FLOW-009 and the parts already done in stage 1; write `.pre-launch/findings/flows-2.json`; do not write `findings/flows.json`".
 
 **Stage 4 — performance.** Only if `performance` is in scope. Dispatch it alone. It generates load and measures a production build, so nothing may run beside it.
 
-**Stage 5 — account teardown.** Only if `flows` is in scope. Dispatch flows a third time: "run only FLOW-009; write `.pre-launch/findings/flows-3.json`". FLOW-009 deletes the shared account, which is why it is last.
+**Stage 5 — account teardown.** Only if `flows` is in scope. Dispatch flows a third time: "run only FLOW-009; write `.pre-launch/findings/flows-3.json`; do not write `findings/flows.json`". FLOW-009 deletes the shared account, which is why it is last.
 
-`merge_findings.py` globs `findings/*.json`, so the three flows files merge by check ID like any other domain file.
+`merge_findings.py` globs `findings/*.json`, so the three flows files merge by check ID like any other domain file; later file wins on the same ID, so stage 3's fuller FLOW-016 verdict supersedes stage 1's.
 
 ### 6. Filling the template
 
@@ -87,7 +87,7 @@ Substitute into `SKILL_DIR/agents/domain-auditor.md`:
 - `{{budget_minutes}}`: `budget_minutes_per_domain` from config, default 20.
 - `{{skill_dir}}`: `SKILL_DIR`. `{{project_dir}}`: `PROJECT_DIR`.
 
-Add one line to every dispatch: "a check file's header may override file order (flows and performance do); follow the header."
+Add these two lines to every dispatch: "a check file's header may override file order (flows and performance do); follow the header. If this dispatch names an output filename, it replaces the template's `findings/{{domain}}.json` — write only to the named file."
 
 Each subagent's final line is a per-domain count. Collect them.
 
@@ -101,10 +101,10 @@ Run:
 
 ### 8. Summary
 
-Read the first 30 lines of `PROJECT_DIR/.pre-launch/report.md` and print to the user:
+Read `PROJECT_DIR/.pre-launch/findings.json` for the numbers below — `report.md` is the artifact you point the user at, not the source you count from. Print:
 
-- the delta line (resolved / new / regressed / open);
-- the blocker count — `fail` findings, counted separately from critical-severity `attest` findings, which are gaps a human must confirm rather than defects (SEC-060, ACC-001, ACC-011, HYG-001, PAY-001 are examples);
+- the delta line (resolved / new / regressed / open), as the merger printed it;
+- the blocker count as the report's `Blockers (critical, open)` line gives it (critical `fail` findings), plus, separately, the count of critical-severity `attest` findings — gaps a human must confirm rather than defects (SEC-060, ACC-001, ACC-011, HYG-001, PAY-001 are examples);
 - the top five open findings by severity;
 - any configured stack that had no reference file;
 - the report path.

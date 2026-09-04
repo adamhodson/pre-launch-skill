@@ -16,6 +16,7 @@ remote:
 test_account:
   strategy: create                # create | provided | none
   email_pattern: prelaunch+{ts}@example.com
+  email: null                     # used when strategy: provided
   credentials_env: PRELAUNCH_TEST_PASSWORD
 features:
   payments: true
