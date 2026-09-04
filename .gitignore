@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 .pre-launch/
 .superpowers/
+!evals/fixtures/**/.pre-launch/
+!evals/fixtures/**/.pre-launch/**

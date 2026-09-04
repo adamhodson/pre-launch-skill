@@ -1,0 +1,36 @@
+version: 1
+stacks: [nextjs, supabase, stripe]
+platforms: [web]
+local:
+  url: http://localhost:3000
+  start: null
+  ready_path: /
+  ready_timeout_s: 120
+remote:
+  url: null
+test_account:
+  strategy: none
+  email_pattern: prelaunch+{ts}@example.com
+  email: null
+  credentials_env: PRELAUNCH_TEST_PASSWORD
+features:
+  payments: true
+  subscriptions: false
+  trials: false
+  uploads: false
+  ai: false
+  user_content: false
+  email_sending: false
+  sms: false
+  biometrics: false
+  teams: false
+  realtime: false
+  graphql: false
+  health_data: false
+  minors_possible: false
+  b2b: false
+  multilingual: false
+tools:
+  declined: []
+budget_minutes_per_domain: 20
+skip: []

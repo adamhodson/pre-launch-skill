@@ -1,0 +1,10 @@
+{
+  "skill_name": "pre-launch",
+  "evals": [
+    {"id": 1, "prompt": "I'm about to launch this Next.js app. Run a pre-launch audit. There's no dev server running, just look at the code.", "expected_output": "Config detected as nextjs+supabase+stripe, web. Static-only run. .pre-launch/findings.json and report.md exist. SEC-001, SEC-051, DAT-001, SEC-035, SEO-009, COMP-001, PAY-018, DAT-004, HYG-003 are fail. No project files modified.", "files": ["evals/fixtures/broken-next"]},
+    {"id": 2, "prompt": "/pre-launch fix security seo — do the easy ones first and pause before the guided ones", "expected_output": "SEC-035 and SEO-009 fixed and committed as separate commits named fix(SEC-035)... and fix(SEO-009)...; SEC-001 handled as easy (moved to env) with a rotation warning; pause before SEC-051; nothing outside security and seo touched.", "files": ["evals/fixtures/broken-next-with-findings"]},
+    {"id": 3, "prompt": "pre-launch check on this API service please. it's express + prisma, no frontend, and I can't run it locally right now", "expected_output": "Stacks express+prisma. Static only. SEC-011 fail (orders/:id unscoped), SEC-038 fail ($queryRawUnsafe), SEC-035 fail (cors()), PAY-005 not applicable (payments false) or fail if payments detected via amount column, SEO and A11Y skipped or error with reasons, FLOW checks error: local tier unavailable. No crash.", "files": ["evals/fixtures/api-only"]},
+    {"id": 4, "prompt": "I added a not-found page and moved the Stripe key to an env var since last time. Re-run the pre-launch audit and show me what changed.", "expected_output": "SEO-009 and SEC-001 flip to pass with resolved set and first_seen preserved from 2026-09-03T12:00:00Z; delta line reports 2 resolved; other four still fail.", "files": ["evals/fixtures/broken-next-fixed-two"]},
+    {"id": 5, "prompt": "/pre-launch compliance", "expected_output": "Only compliance findings are updated; the six existing findings in other domains are carried forward unchanged; report shows domains: compliance for the latest run.", "files": ["evals/fixtures/broken-next-with-findings"]}
+  ]
+}

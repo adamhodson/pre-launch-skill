@@ -1,0 +1,2 @@
+{"name": "api-only", "private": true, "scripts": {"start": "node src/index.js"},
+ "dependencies": {"express": "4.19.2", "@prisma/client": "5.18.0", "cors": "2.8.5"}, "devDependencies": {"prisma": "5.18.0"}}

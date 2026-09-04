@@ -1,0 +1,6 @@
+const express = require('express'); const cors = require('cors'); const { PrismaClient } = require('@prisma/client')
+const app = express(); const db = new PrismaClient()
+app.use(cors()); app.use(express.json())
+app.get('/orders/:id', async (req, res) => res.json(await db.order.findUnique({ where: { id: req.params.id } })))
+app.get('/search', async (req, res) => res.json(await db.$queryRawUnsafe(`select * from orders where note like '%${req.query.q}%'`)))
+app.listen(process.env.PORT || 4000)
